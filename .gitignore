@@ -1,0 +1,7 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+bin/
+dist/
+*.log
+.DS_Store
