@@ -14,8 +14,9 @@ Manage an organization invite.
 
 ```terraform
 resource "openai_invite" "example" {
-  email = "example_email"
-  role  = "owner"
+  email    = "example_email"
+  role     = "owner"
+  projects = []
 }
 ```
 
@@ -27,6 +28,10 @@ resource "openai_invite" "example" {
 - `email` (String) email
 - `role` (String) role
 
+### Optional
+
+- `projects` (Attributes List) Projects to which membership is granted when the invite is accepted. If omitted, no project membership is granted. (see [below for nested schema](#nestedatt--projects))
+
 ### Read-Only
 
 - `accepted_at` (Number) accepted at
@@ -35,3 +40,11 @@ resource "openai_invite" "example" {
 - `id` (String) id
 - `invite_id` (String) invite id
 - `status` (String) status
+
+<a id="nestedatt--projects"></a>
+### Nested Schema for `projects`
+
+Required:
+
+- `id` (String) Project public ID.
+- `role` (String) Project membership role.

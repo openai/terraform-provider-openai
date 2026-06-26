@@ -35,6 +35,7 @@ func TestAccInvite_Basic(t *testing.T) {
 				Config: testAccInviteBasicConfig1(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("openai_invite.test", "role", "reader"),
+					resource.TestCheckResourceAttr("openai_invite.test", "projects.#", "0"),
 				),
 			},
 		},

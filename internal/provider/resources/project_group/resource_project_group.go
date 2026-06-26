@@ -81,7 +81,6 @@ func (r *ProjectGroupResource) Schema(ctx context.Context, req resource.SchemaRe
 				Computed:            false,
 				Sensitive:           false,
 				Validators: []validator.String{
-					openaiapi.StringIsValidPathParameter(),
 					openaiapi.StringLengthAtLeast(1),
 				},
 				PlanModifiers: []planmodifier.String{
@@ -200,24 +199,6 @@ func (r *ProjectGroupResource) Read(ctx context.Context, req resource.ReadReques
 		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
 		return
 	}
-	{
-		pathParams := map[string]string{
-			"project_id": data.ProjectID.ValueString(),
-			"group_id":   data.GroupID.ValueString(),
-			"role_id":    data.Role.ValueString(),
-		}
-		queryParams := map[string]string{}
-		responseData, err := r.client.Request(ctx, "GET", "/projects/{project_id}/groups/{group_id}/roles/{role_id}", pathParams, queryParams, nil)
-		if err != nil {
-			if openaiapi.IsNotFound(err) {
-				resp.State.RemoveResource(ctx)
-				return
-			}
-			resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
-			return
-		}
-		_ = responseData
-	}
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"project_id"}, &data.ProjectID, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
@@ -294,10 +275,6 @@ func (r *ProjectGroupResource) ImportState(ctx context.Context, req resource.Imp
 		return
 	}
 	if err := openaiapi.ValidatePathParameter("group_id", parts[1]); err != nil {
-		resp.Diagnostics.AddError("Invalid import ID", err.Error())
-		return
-	}
-	if err := openaiapi.ValidatePathParameter("role", parts[2]); err != nil {
 		resp.Diagnostics.AddError("Invalid import ID", err.Error())
 		return
 	}

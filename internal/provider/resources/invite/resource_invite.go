@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -30,10 +33,16 @@ type InviteResourceModel struct {
 	ID         types.String `tfsdk:"id"`
 	Email      types.String `tfsdk:"email"`
 	Role       types.String `tfsdk:"role"`
+	Projects   types.List   `tfsdk:"projects"`
 	Status     types.String `tfsdk:"status"`
 	CreatedAt  types.Int64  `tfsdk:"created_at"`
 	ExpiresAt  types.Int64  `tfsdk:"expires_at"`
 	AcceptedAt types.Int64  `tfsdk:"accepted_at"`
+}
+
+type InviteProjectModel struct {
+	ID   types.String `tfsdk:"id"`
+	Role types.String `tfsdk:"role"`
 }
 
 func NewInviteResource() resource.Resource {
@@ -95,6 +104,40 @@ func (r *InviteResource) Schema(ctx context.Context, req resource.SchemaRequest,
 				},
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"projects": schema.ListNestedAttribute{
+				MarkdownDescription: "Projects to which membership is granted when the invite is accepted. If omitted, no project membership is granted.",
+				Required:            false,
+				Optional:            true,
+				Computed:            true,
+				Sensitive:           false,
+				PlanModifiers: []planmodifier.List{
+					listplanmodifier.RequiresReplace(),
+				},
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"id": schema.StringAttribute{
+							MarkdownDescription: "Project public ID.",
+							Required:            true,
+							Optional:            false,
+							Computed:            false,
+							Sensitive:           false,
+							Validators: []validator.String{
+								openaiapi.StringLengthAtLeast(1),
+							},
+						},
+						"role": schema.StringAttribute{
+							MarkdownDescription: "Project membership role.",
+							Required:            true,
+							Optional:            false,
+							Computed:            false,
+							Sensitive:           false,
+							Validators: []validator.String{
+								openaiapi.StringOneOf("member", "owner"),
+							},
+						},
+					},
 				},
 			},
 			"status": schema.StringAttribute{
@@ -159,6 +202,21 @@ func (r *InviteResource) Create(ctx context.Context, req resource.CreateRequest,
 	body := map[string]any{}
 	openaiapi.AddStringBodyField(body, "email", data.Email)
 	openaiapi.AddStringBodyField(body, "role", data.Role)
+	projectsValue := []map[string]any{}
+	if !data.Projects.IsNull() && !data.Projects.IsUnknown() {
+		var projectsItems []InviteProjectModel
+		resp.Diagnostics.Append(data.Projects.ElementsAs(ctx, &projectsItems, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		for _, project := range projectsItems {
+			projectValue := map[string]any{}
+			openaiapi.AddStringBodyField(projectValue, "id", project.ID)
+			openaiapi.AddStringBodyField(projectValue, "role", project.Role)
+			projectsValue = append(projectsValue, projectValue)
+		}
+	}
+	openaiapi.SetBodyField(body, []string{"projects"}, projectsValue)
 	responseData, err := r.client.Request(ctx, "POST", "/organization/invites", pathParams, queryParams, body)
 	if err != nil {
 		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
@@ -179,6 +237,42 @@ func (r *InviteResource) Create(ctx context.Context, req resource.CreateRequest,
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"role"}, &data.Role, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
+	}
+	projectsResultItems, err := openaiapi.ResponseObjectList(responseData, "projects", false)
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
+		return
+	}
+	if projectsResultItems == nil {
+		if data.Projects.IsUnknown() {
+			data.Projects = types.ListNull(types.ObjectType{AttrTypes: map[string]attr.Type{
+				"id":   types.StringType,
+				"role": types.StringType,
+			}})
+		}
+	} else {
+		projectsItems := []InviteProjectModel{}
+		for _, projectData := range projectsResultItems {
+			project := InviteProjectModel{}
+			if err := openaiapi.ApplyStringResponseField(projectData, []string{"id"}, &project.ID, false); err != nil {
+				resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
+				return
+			}
+			if err := openaiapi.ApplyStringResponseField(projectData, []string{"role"}, &project.Role, false); err != nil {
+				resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
+				return
+			}
+			projectsItems = append(projectsItems, project)
+		}
+		projectsItemsValue, projectsDiags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: map[string]attr.Type{
+			"id":   types.StringType,
+			"role": types.StringType,
+		}}, projectsItems)
+		resp.Diagnostics.Append(projectsDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		data.Projects = projectsItemsValue
 	}
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"status"}, &data.Status, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
@@ -237,6 +331,42 @@ func (r *InviteResource) Read(ctx context.Context, req resource.ReadRequest, res
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"role"}, &data.Role, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
+	}
+	projectsResultItems, err := openaiapi.ResponseObjectList(responseData, "projects", false)
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
+		return
+	}
+	if projectsResultItems == nil {
+		if data.Projects.IsUnknown() {
+			data.Projects = types.ListNull(types.ObjectType{AttrTypes: map[string]attr.Type{
+				"id":   types.StringType,
+				"role": types.StringType,
+			}})
+		}
+	} else {
+		projectsItems := []InviteProjectModel{}
+		for _, projectData := range projectsResultItems {
+			project := InviteProjectModel{}
+			if err := openaiapi.ApplyStringResponseField(projectData, []string{"id"}, &project.ID, false); err != nil {
+				resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
+				return
+			}
+			if err := openaiapi.ApplyStringResponseField(projectData, []string{"role"}, &project.Role, false); err != nil {
+				resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
+				return
+			}
+			projectsItems = append(projectsItems, project)
+		}
+		projectsItemsValue, projectsDiags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: map[string]attr.Type{
+			"id":   types.StringType,
+			"role": types.StringType,
+		}}, projectsItems)
+		resp.Diagnostics.Append(projectsDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		data.Projects = projectsItemsValue
 	}
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"status"}, &data.Status, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())

@@ -49,7 +49,7 @@
     "docs/resources/group.md": "976ce205c197506cb6650604028f9cdfa369ed1672f0e08af44c4b71fbe00f11",
     "docs/resources/group_role.md": "729240ceddb0ae4718d1e52c0596aa3f4f299249d752283ac3b645d72c74cef9",
     "docs/resources/group_user.md": "b32e67719d7e3e466bff6f9cb81c2d403e22a0ef4238f1316c0dcc77d6f7ff75",
-    "docs/resources/invite.md": "f4052b389cae7cf9adc3c921dcf2c3d78f44445411098469f65c96f8bf0cafb4",
+    "docs/resources/invite.md": "8b72d84e6c33aadbd0589bcea135df08d9025d1e78d1ac9313fdbae3de6b198a",
     "docs/resources/organization_data_retention.md": "c70384be8f25022f862f36866cb406f63f0a5772a2d3074c98d11da144a322bf",
     "docs/resources/organization_spend_alert.md": "4bf06cddf8e1b3982ee7d3e999049660b68429744616a5b401e5f6e50c3a268e",
     "docs/resources/organization_user.md": "7ca43479d1cdb48c0d3b6587d3cc6629e79c428b41d2265731e99562959dc60d",
@@ -111,7 +111,7 @@
     "examples/resources/openai_group/resource.tf": "f8d83f43d42484c30da975d3774b4fcfa2816d019eddff4592099f9fd1846651",
     "examples/resources/openai_group_role/resource.tf": "ce04250957cebd7c644f3c93f3c82724ccbbcb4c24f7a0ef38efd6a24bbae38f",
     "examples/resources/openai_group_user/resource.tf": "a8efb5fccb3707613a1e502ddc7cdc7d81d7e8fd1a45ef740ba0c3e2b5944e2d",
-    "examples/resources/openai_invite/resource.tf": "eba3bbfa4d5af00b0433109cd560af0e95cfd58787bdf10cd092a5a2a5566bda",
+    "examples/resources/openai_invite/resource.tf": "a0ef02f01316f18335f61ef9407d24a8526ea3f6bd8b26d9c4442e672fc928dd",
     "examples/resources/openai_organization_data_retention/resource.tf": "86b1b5a0dd910efcfd8402a7570b896e34b2bcb9f0c4ea5d7655a38291516e77",
     "examples/resources/openai_organization_spend_alert/resource.tf": "d882f25ff28486bb713fe812d20960b88d9f8ac87c64cc4d4134e49ccf7de854",
     "examples/resources/openai_organization_user/resource.tf": "f7b1a3eb89f463cf293e9ce52ce2ef0c1ad7c28c0ae0107a4fc72ee7aae53efd",
@@ -165,8 +165,8 @@
     "internal/provider/resources/invite/data_source_invite_acc_test.go": "bc3376fa3d1b5c0f478a8ede0cb827aefeef6734bf3910ad7dd1dd361f53536d",
     "internal/provider/resources/invite/data_source_invites.go": "1ab2283ed61fe4f79949831c0c4cf2c7bc4080d01b7e55124dadc46f16de1652",
     "internal/provider/resources/invite/data_source_invites_acc_test.go": "17be53d21eb31b1011000a19f9011cbfb65e145cd0d34b11672395bc4841bed8",
-    "internal/provider/resources/invite/resource_invite.go": "848052107f24902c526685211be856a202b53e795f587daf5260670626929a78",
-    "internal/provider/resources/invite/resource_invite_acc_test.go": "950fbae6bcb25314959c99cc1a8b38870cfdf755e4955599e95b6af08ea2b79e",
+    "internal/provider/resources/invite/resource_invite.go": "963b6e3658e3fb2546d3d784884713095921e4ba4ea72355786bf0fae4fcca37",
+    "internal/provider/resources/invite/resource_invite_acc_test.go": "ead36833746a933cfca3f25293734530e509e7fd417e3777f376840bd1c785c6",
     "internal/provider/resources/organization_data_retention/data_source_organization_data_retention.go": "34d18dc829f04ae410ba3556cb1f0c9c80fd29e4a791deecff51db422a1cfc40",
     "internal/provider/resources/organization_data_retention/resource_organization_data_retention.go": "679ce584e8e2c5ac6c52fc09e47a0a21b1ac30906555d03a5eccfcac1db15c84",
     "internal/provider/resources/organization_data_retention/resource_organization_data_retention_acc_test.go": "4436d7083bc1fb41c48efda97dc27f290b9d472b6df84e4f4b3964e776ac26bf",
@@ -194,7 +194,7 @@
     "internal/provider/resources/project_group/data_source_project_group_acc_test.go": "9f83641e9eb8ba358e5411063af3410a45c06b8d36b9219b2106f9bd0a3c1f8e",
     "internal/provider/resources/project_group/data_source_project_groups.go": "12c8c57c62f0e01a4f401c586ddd85250162f76a7751f00425fce291a9ba43b1",
     "internal/provider/resources/project_group/data_source_project_groups_acc_test.go": "c1c40ae2cd06825f9f38c22988fc89dd30eef0d1f1c0658d6c3c0aa8d5accdb4",
-    "internal/provider/resources/project_group/resource_project_group.go": "86ace4dc63f771513fc490ccad36d2ede272094128df217f297b688b8aa4f903",
+    "internal/provider/resources/project_group/resource_project_group.go": "dc379eb93420e594e5c302b4f6acbe92882cdebfb843ccdc2bfac404b1f185d4",
     "internal/provider/resources/project_group/resource_project_group_acc_test.go": "2f275f4a8f86e96e74331ece5c4cea18edebdc610c3db75ba0642c1dcfc46c1c",
     "internal/provider/resources/project_group_role/data_source_project_group_role.go": "f7afe18b3f443ff84075abdd72fcd6470f87f7b954929b8dde505b0ee728fe9c",
     "internal/provider/resources/project_group_role/data_source_project_group_role_acc_test.go": "d166f855b4ce383c2e88a593a191488501284b572e5de816cc8e8b778a78dbfc",
@@ -251,7 +251,7 @@
     "terraform-registry-manifest.json": "f809ab383cca0a5f83072981c64208cbd7fa67e986a86ee02dd2c82333221e32",
     "tools/go.mod": "509f09427816e99f751b681d716e2c5cfd05548407a7e914cb2dcd1f202de452",
     "tools/go.sum": "fc308b080c1fe8dc0d564f1fadfae4e86986f901014da7683684b6761a85fd71",
-    "tools/tools.go": "030368597f46ea939b1fbc506eb451746b25c72b2d8f9c1870395c21bc8706db"
+    "tools/tools.go": "97cf694f9eaeb3aab1087fd08787f3f36d4cfbe127c9baf426d5365d4515b52e"
   },
   "version": 1
 }
