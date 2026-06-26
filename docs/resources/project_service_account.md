@@ -27,10 +27,6 @@ resource "openai_project_service_account" "example" {
 - `name` (String) name
 - `project_id` (String) project id
 
-### Optional
-
-- `role` (String) role
-
 ### Read-Only
 
 - `created_at` (Number) created at

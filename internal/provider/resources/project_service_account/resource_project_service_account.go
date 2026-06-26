@@ -30,7 +30,6 @@ type ProjectServiceAccountResourceModel struct {
 	ServiceAccountID types.String `tfsdk:"service_account_id"`
 	ID               types.String `tfsdk:"id"`
 	Name             types.String `tfsdk:"name"`
-	Role             types.String `tfsdk:"role"`
 	CreatedAt        types.Int64  `tfsdk:"created_at"`
 }
 
@@ -96,19 +95,6 @@ func (r *ProjectServiceAccountResource) Schema(ctx context.Context, req resource
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"role": schema.StringAttribute{
-				MarkdownDescription: "role",
-				Required:            false,
-				Optional:            true,
-				Computed:            true,
-				Sensitive:           false,
-				Validators: []validator.String{
-					openaiapi.StringOneOf("member", "owner"),
-				},
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
 			"created_at": schema.Int64Attribute{
 				MarkdownDescription: "created at",
 				Required:            false,
@@ -142,12 +128,12 @@ func (r *ProjectServiceAccountResource) Create(ctx context.Context, req resource
 		resp.Diagnostics.AddError("Missing OpenAI API client", "The provider was not configured before this operation ran.")
 		return
 	}
-	plannedData := data
 	pathParams := map[string]string{
 		"project_id": data.ProjectID.ValueString(),
 	}
 	queryParams := map[string]string{}
 	body := map[string]any{}
+	openaiapi.SetBodyField(body, []string{"create_service_account_only"}, true)
 	openaiapi.AddStringBodyField(body, "name", data.Name)
 	responseData, err := r.client.Request(ctx, "POST", "/organization/projects/{project_id}/service_accounts", pathParams, queryParams, body)
 	if err != nil {
@@ -166,51 +152,10 @@ func (r *ProjectServiceAccountResource) Create(ctx context.Context, req resource
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
 	}
-	if err := openaiapi.ApplyStringResponseField(responseData, []string{"role"}, &data.Role, false); err != nil {
-		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-		return
-	}
 	if err := openaiapi.ApplyInt64ResponseField(responseData, []string{"created_at"}, &data.CreatedAt, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
 	}
-	{
-		pathParams := map[string]string{
-			"project_id":         data.ProjectID.ValueString(),
-			"service_account_id": data.ServiceAccountID.ValueString(),
-		}
-		queryParams := map[string]string{}
-		body := map[string]any{}
-		openaiapi.AddStringBodyField(body, "role", plannedData.Role)
-		if len(body) > 0 {
-			responseData, err = r.client.Request(ctx, "POST", "/organization/projects/{project_id}/service_accounts/{service_account_id}", pathParams, queryParams, body)
-			if err != nil {
-				resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
-				return
-			}
-			if err := openaiapi.ApplyStringResponseField(responseData, []string{"id"}, &data.ServiceAccountID, true); err != nil {
-				resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-				return
-			}
-			if err := openaiapi.ApplyStringResponseField(responseData, []string{"id"}, &data.ID, true); err != nil {
-				resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-				return
-			}
-			if err := openaiapi.ApplyStringResponseField(responseData, []string{"name"}, &data.Name, false); err != nil {
-				resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-				return
-			}
-			if err := openaiapi.ApplyStringResponseField(responseData, []string{"role"}, &data.Role, false); err != nil {
-				resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-				return
-			}
-			if err := openaiapi.ApplyInt64ResponseField(responseData, []string{"created_at"}, &data.CreatedAt, false); err != nil {
-				resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-				return
-			}
-		}
-	}
-
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -250,10 +195,6 @@ func (r *ProjectServiceAccountResource) Read(ctx context.Context, req resource.R
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
 	}
-	if err := openaiapi.ApplyStringResponseField(responseData, []string{"role"}, &data.Role, false); err != nil {
-		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-		return
-	}
 	if err := openaiapi.ApplyInt64ResponseField(responseData, []string{"created_at"}, &data.CreatedAt, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
@@ -272,39 +213,7 @@ func (r *ProjectServiceAccountResource) Update(ctx context.Context, req resource
 		resp.Diagnostics.AddError("Missing OpenAI API client", "The provider was not configured before this operation ran.")
 		return
 	}
-	pathParams := map[string]string{
-		"project_id":         data.ProjectID.ValueString(),
-		"service_account_id": data.ServiceAccountID.ValueString(),
-	}
-	queryParams := map[string]string{}
-	body := map[string]any{}
-	openaiapi.AddStringBodyField(body, "role", data.Role)
-	responseData, err := r.client.Request(ctx, "POST", "/organization/projects/{project_id}/service_accounts/{service_account_id}", pathParams, queryParams, body)
-	if err != nil {
-		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
-		return
-	}
-	if err := openaiapi.ApplyStringResponseField(responseData, []string{"id"}, &data.ServiceAccountID, true); err != nil {
-		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-		return
-	}
-	if err := openaiapi.ApplyStringResponseField(responseData, []string{"id"}, &data.ID, true); err != nil {
-		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-		return
-	}
-	if err := openaiapi.ApplyStringResponseField(responseData, []string{"name"}, &data.Name, false); err != nil {
-		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-		return
-	}
-	if err := openaiapi.ApplyStringResponseField(responseData, []string{"role"}, &data.Role, false); err != nil {
-		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-		return
-	}
-	if err := openaiapi.ApplyInt64ResponseField(responseData, []string{"created_at"}, &data.CreatedAt, false); err != nil {
-		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-		return
-	}
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+	resp.Diagnostics.AddError("Unsupported update", "The provider config does not define an update operation for openai_project_service_account. Change replace-only attributes by recreating the resource.")
 }
 
 func (r *ProjectServiceAccountResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
