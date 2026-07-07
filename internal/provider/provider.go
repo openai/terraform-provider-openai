@@ -42,12 +42,15 @@ import (
 
 var _ provider.Provider = &OpenAIProvider{}
 
+const defaultBaseURL = "https://api.openai.com/v1"
+
 type OpenAIProvider struct {
 	version string
 }
 
 type OpenAIProviderModel struct {
 	AdminAPIKey  types.String `tfsdk:"admin_api_key"`
+	BaseURL      types.String `tfsdk:"base_url"`
 	Organization types.String `tfsdk:"organization"`
 	Project      types.String `tfsdk:"project"`
 }
@@ -66,6 +69,12 @@ func (p *OpenAIProvider) Schema(ctx context.Context, req provider.SchemaRequest,
 				Required:            false,
 				Optional:            true,
 				Sensitive:           true,
+			},
+			"base_url": schema.StringAttribute{
+				MarkdownDescription: "Base URL used for OpenAI API requests.",
+				Required:            false,
+				Optional:            true,
+				Sensitive:           false,
 			},
 			"organization": schema.StringAttribute{
 				MarkdownDescription: "Organization identifier to send with requests.",
@@ -90,11 +99,22 @@ func (p *OpenAIProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		return
 	}
 
-	client := &openaiapi.APIClient{ProviderVersion: p.version}
+	client := &openaiapi.APIClient{
+		BaseURL:         defaultBaseURL,
+		ProviderVersion: p.version,
+	}
 	if !data.AdminAPIKey.IsNull() && !data.AdminAPIKey.IsUnknown() {
 		client.AdminAPIKey = data.AdminAPIKey.ValueString()
 	} else if value, ok := os.LookupEnv("OPENAI_ADMIN_KEY"); ok {
 		client.AdminAPIKey = value
+	}
+
+	if !data.BaseURL.IsNull() && !data.BaseURL.IsUnknown() {
+		client.BaseURL = strings.TrimSpace(data.BaseURL.ValueString())
+		if client.BaseURL == "" {
+			resp.Diagnostics.AddError("Invalid OpenAI API base URL", "base_url must not be empty.")
+			return
+		}
 	}
 
 	if !data.Organization.IsNull() && !data.Organization.IsUnknown() {
@@ -113,7 +133,7 @@ func (p *OpenAIProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		resp.Diagnostics.AddError("Missing OpenAI API key", "Set admin_api_key, OPENAI_ADMIN_KEY.")
 		return
 	}
-	options := []option.RequestOption{option.WithBaseURL("https://api.openai.com/v1")}
+	options := []option.RequestOption{option.WithBaseURL(client.BaseURL)}
 	apiKey := strings.TrimSpace(client.AdminAPIKey)
 	if apiKey != "" {
 		options = append(options, option.WithAPIKey(apiKey))

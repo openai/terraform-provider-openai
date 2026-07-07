@@ -37,5 +37,6 @@ provider "openai" {
 ### Optional
 
 - `admin_api_key` (String, Sensitive) Admin API key used for organization administration requests.
+- `base_url` (String) Base URL used for OpenAI API requests.
 - `organization` (String) Organization identifier to send with requests.
 - `project` (String) Project identifier to send with requests.

@@ -21,6 +21,7 @@ import (
 
 type APIClient struct {
 	AdminAPIKey     string
+	BaseURL         string
 	Organization    string
 	Project         string
 	ProviderVersion string
