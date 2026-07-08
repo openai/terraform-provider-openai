@@ -32,6 +32,27 @@ resource "openai_project_role" "test" {
 	)
 }
 
+func testAccProjectRolePermissionlessConfig1(t *testing.T) string {
+	t.Helper()
+	return fmt.Sprintf(
+		`provider "openai" {}
+
+resource "openai_project" "test" {
+  name = %q
+}
+
+resource "openai_project_role" "test" {
+  project_id = openai_project.test.project_id
+  role_name = %q
+  permissions = []
+  description = "Managed by Terraform acceptance tests"
+}
+`,
+		acctest.TemplateValue(t, "tf-acc-openai-project-role-empty-{suffix}"),
+		acctest.TemplateValue(t, "tf-acc-openai-project-role-empty-{suffix}"),
+	)
+}
+
 func TestAccProjectRole_Basic(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck: func() {
@@ -43,6 +64,23 @@ func TestAccProjectRole_Basic(t *testing.T) {
 				Config: testAccProjectRoleBasicConfig1(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("openai_project_role.test", "role_name", acctest.TemplateValue(t, "tf-acc-openai-project-role-{suffix}")),
+				),
+			},
+		},
+	})
+}
+
+func TestAccProjectRole_Permissionless(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() {
+			acctest.PreCheck(t, []string{"OPENAI_ADMIN_KEY"})
+		},
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProjectRolePermissionlessConfig1(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("openai_project_role.test", "permissions.#", "0"),
 				),
 			},
 		},

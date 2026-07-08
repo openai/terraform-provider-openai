@@ -102,9 +102,6 @@ func (r *ProjectRoleResource) Schema(ctx context.Context, req resource.SchemaReq
 				Optional:            false,
 				Computed:            false,
 				Sensitive:           false,
-				Validators: []validator.List{
-					openaiapi.ListSizeAtLeast(1),
-				},
 			},
 			"description": schema.StringAttribute{
 				MarkdownDescription: "description",
