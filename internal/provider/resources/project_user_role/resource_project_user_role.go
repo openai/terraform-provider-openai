@@ -173,10 +173,6 @@ func (r *ProjectUserRoleResource) Create(ctx context.Context, req resource.Creat
 		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
 		return
 	}
-	if err := openaiapi.ApplyStringResponseField(responseData, []string{"role.id", "id"}, &data.RoleID, true); err != nil {
-		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-		return
-	}
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"name"}, &data.Name, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
@@ -223,10 +219,6 @@ func (r *ProjectUserRoleResource) Read(ctx context.Context, req resource.ReadReq
 			return
 		}
 		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
-		return
-	}
-	if err := openaiapi.ApplyStringResponseField(responseData, []string{"role.id", "id"}, &data.RoleID, true); err != nil {
-		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
 	}
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"name"}, &data.Name, false); err != nil {
