@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/openai/terraform-provider-openai/compare/v0.3.0...v0.3.1) (2026-07-09)
+
+
+### Bug Fixes
+
+* link Admin API docs in README ([#14](https://github.com/openai/terraform-provider-openai/issues/14)) ([e3adde5](https://github.com/openai/terraform-provider-openai/commit/e3adde5df3b9cdb759b093180305e72933b7e4f0))
+
 ## [0.2.0](https://github.com/openai/terraform-provider-openai/compare/v0.1.0...v0.2.0) (2026-07-08)
 
 
