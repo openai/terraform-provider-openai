@@ -13,8 +13,9 @@ See [`docs/`](docs/index.md) for resource and data source documentation.
 - [Terraform](https://developer.hashicorp.com/terraform/downloads) CLI 1.0 or later
 - An [OpenAI Admin API key](https://platform.openai.com/settings/organization/admin-keys)
 
-Admin API keys are required for Administration API endpoints and cannot be used
-for non-administration OpenAI API endpoints.
+[Admin API keys](https://developers.openai.com/api/docs/guides/admin-apis) are
+required for Administration API endpoints and cannot be used for
+non-administration OpenAI API endpoints.
 
 ## Usage
 
