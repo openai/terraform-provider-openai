@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1](https://github.com/openai/terraform-provider-openai/compare/v0.4.0...v0.4.1) (2026-07-10)
+
+
+### Bug Fixes
+
+* preserve group role IDs ([#20](https://github.com/openai/terraform-provider-openai/issues/20)) ([fbad77a](https://github.com/openai/terraform-provider-openai/commit/fbad77a8c9806b61f64637301374fdd03a1f14cb))
+* preserve project group role IDs ([#19](https://github.com/openai/terraform-provider-openai/issues/19)) ([2ffb770](https://github.com/openai/terraform-provider-openai/commit/2ffb7702831b69fd79e6fade3bb4fad37cb0bc14))
+
 ## [0.4.0](https://github.com/openai/terraform-provider-openai/compare/v0.3.1...v0.4.0) (2026-07-10)
 
 
