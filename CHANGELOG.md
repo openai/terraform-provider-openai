@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/openai/terraform-provider-openai/compare/v0.3.1...v0.4.0) (2026-07-10)
+
+
+### Features
+
+* clarify API Platform provider setup ([#17](https://github.com/openai/terraform-provider-openai/issues/17)) ([50554da](https://github.com/openai/terraform-provider-openai/commit/50554da159566692e41591d4f8e9a211787fb4cf))
+
 ## [0.3.1](https://github.com/openai/terraform-provider-openai/compare/v0.3.0...v0.3.1) (2026-07-09)
 
 
