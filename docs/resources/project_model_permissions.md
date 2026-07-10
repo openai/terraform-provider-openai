@@ -32,3 +32,16 @@ resource "openai_project_model_permissions" "example" {
 ### Read-Only
 
 - `object` (String) object
+
+## Import
+
+Import is supported using the following syntax:
+
+In Terraform v1.5.0 and later, the [`import` block](https://developer.hashicorp.com/terraform/language/import) can be used with the `id` attribute, for example:
+
+```terraform
+import {
+  to = openai_project_model_permissions.example
+  id = "proj_123"
+}
+```

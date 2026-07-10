@@ -36,3 +36,16 @@ resource "openai_certificate" "example" {
 - `expires_at` (Number) expires at
 - `id` (String) id
 - `valid_at` (Number) valid at
+
+## Import
+
+Import is supported using the following syntax:
+
+In Terraform v1.5.0 and later, the [`import` block](https://developer.hashicorp.com/terraform/language/import) can be used with the `id` attribute, for example:
+
+```terraform
+import {
+  to = openai_certificate.example
+  id = "certificate_123"
+}
+```

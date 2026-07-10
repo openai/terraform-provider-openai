@@ -37,3 +37,16 @@ resource "openai_project" "example" {
 - `id` (String) id
 - `project_id` (String) project id
 - `status` (String) status
+
+## Import
+
+Import is supported using the following syntax:
+
+In Terraform v1.5.0 and later, the [`import` block](https://developer.hashicorp.com/terraform/language/import) can be used with the `id` attribute, for example:
+
+```terraform
+import {
+  to = openai_project.example
+  id = "proj_123"
+}
+```

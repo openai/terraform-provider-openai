@@ -16,7 +16,7 @@ Manage a group assignment to a project.
 resource "openai_project_group" "example" {
   project_id = "proj_123"
   group_id   = "group_123"
-  role       = "member"
+  role       = "role-api-project-member"
 }
 ```
 
@@ -34,3 +34,16 @@ resource "openai_project_group" "example" {
 - `created_at` (Number) created at
 - `group_name` (String) group name
 - `group_type` (String) group type
+
+## Import
+
+Import is supported using the following syntax:
+
+In Terraform v1.5.0 and later, the [`import` block](https://developer.hashicorp.com/terraform/language/import) can be used with the `id` attribute, for example:
+
+```terraform
+import {
+  to = openai_project_group.example
+  id = "proj_123/group_123/role-api-project-member"
+}
+```

@@ -26,3 +26,16 @@ resource "openai_group_user" "example" {
 
 - `group_id` (String) group id
 - `user_id` (String) user id
+
+## Import
+
+Import is supported using the following syntax:
+
+In Terraform v1.5.0 and later, the [`import` block](https://developer.hashicorp.com/terraform/language/import) can be used with the `id` attribute, for example:
+
+```terraform
+import {
+  to = openai_group_user.example
+  id = "group_123/user_123"
+}
+```

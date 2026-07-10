@@ -43,3 +43,16 @@ resource "openai_project_spend_alert" "example" {
 
 - `alert_id` (String) alert id
 - `id` (String) id
+
+## Import
+
+Import is supported using the following syntax:
+
+In Terraform v1.5.0 and later, the [`import` block](https://developer.hashicorp.com/terraform/language/import) can be used with the `id` attribute, for example:
+
+```terraform
+import {
+  to = openai_project_spend_alert.example
+  id = "proj_123/alert_123"
+}
+```

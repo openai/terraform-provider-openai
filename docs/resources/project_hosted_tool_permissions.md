@@ -34,3 +34,16 @@ resource "openai_project_hosted_tool_permissions" "example" {
 - `mcp_enabled` (Boolean) mcp enabled
 - `project_id` (String) project id
 - `web_search_enabled` (Boolean) web search enabled
+
+## Import
+
+Import is supported using the following syntax:
+
+In Terraform v1.5.0 and later, the [`import` block](https://developer.hashicorp.com/terraform/language/import) can be used with the `id` attribute, for example:
+
+```terraform
+import {
+  to = openai_project_hosted_tool_permissions.example
+  id = "proj_123"
+}
+```
