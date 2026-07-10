@@ -37,3 +37,16 @@ resource "openai_project_user" "example" {
 
 - `added_at` (Number) added at
 - `name` (String) name
+
+## Import
+
+Import is supported using the following syntax:
+
+In Terraform v1.5.0 and later, the [`import` block](https://developer.hashicorp.com/terraform/language/import) can be used with the `id` attribute, for example:
+
+```terraform
+import {
+  to = openai_project_user.example
+  id = "proj_123/user_123"
+}
+```

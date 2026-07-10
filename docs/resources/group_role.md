@@ -26,3 +26,16 @@ resource "openai_group_role" "example" {
 
 - `group_id` (String) group id
 - `role_id` (String) role id
+
+## Import
+
+Import is supported using the following syntax:
+
+In Terraform v1.5.0 and later, the [`import` block](https://developer.hashicorp.com/terraform/language/import) can be used with the `id` attribute, for example:
+
+```terraform
+import {
+  to = openai_group_role.example
+  id = "group_123/role_123"
+}
+```

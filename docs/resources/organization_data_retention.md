@@ -29,3 +29,16 @@ resource "openai_organization_data_retention" "example" {
 
 - `object` (String) object
 - `singleton_id` (String) singleton id
+
+## Import
+
+Import is supported using the following syntax:
+
+In Terraform v1.5.0 and later, the [`import` block](https://developer.hashicorp.com/terraform/language/import) can be used with the `id` attribute, for example:
+
+```terraform
+import {
+  to = openai_organization_data_retention.example
+  id = "organization"
+}
+```

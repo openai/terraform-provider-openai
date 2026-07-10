@@ -37,3 +37,16 @@ resource "openai_role" "example" {
 - `predefined_role` (Boolean) predefined role
 - `resource_type` (String) resource type
 - `role_id` (String) role id
+
+## Import
+
+Import is supported using the following syntax:
+
+In Terraform v1.5.0 and later, the [`import` block](https://developer.hashicorp.com/terraform/language/import) can be used with the `id` attribute, for example:
+
+```terraform
+import {
+  to = openai_role.example
+  id = "role_123"
+}
+```

@@ -32,3 +32,16 @@ resource "openai_project_service_account" "example" {
 - `created_at` (Number) created at
 - `id` (String) id
 - `service_account_id` (String) service account id
+
+## Import
+
+Import is supported using the following syntax:
+
+In Terraform v1.5.0 and later, the [`import` block](https://developer.hashicorp.com/terraform/language/import) can be used with the `id` attribute, for example:
+
+```terraform
+import {
+  to = openai_project_service_account.example
+  id = "proj_123/service_account_123"
+}
+```
