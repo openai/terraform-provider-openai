@@ -60,7 +60,7 @@ func (p *OpenAIProvider) Metadata(ctx context.Context, req provider.MetadataRequ
 
 func (p *OpenAIProvider) Schema(ctx context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Terraform provider for OpenAI administration APIs.",
+		MarkdownDescription: "Terraform provider for OpenAI administration APIs, specific to the API Platform.",
 		Attributes: map[string]schema.Attribute{
 			"admin_api_key": schema.StringAttribute{
 				MarkdownDescription: "Admin API key used for organization administration requests.",
