@@ -107,10 +107,7 @@ func (r *GroupRoleResource) Create(ctx context.Context, req resource.CreateReque
 		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
 		return
 	}
-	if err := openaiapi.ApplyStringResponseField(responseData, []string{"role.id", "id"}, &data.RoleID, true); err != nil {
-		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-		return
-	}
+	_ = responseData
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -138,10 +135,7 @@ func (r *GroupRoleResource) Read(ctx context.Context, req resource.ReadRequest, 
 		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
 		return
 	}
-	if err := openaiapi.ApplyStringResponseField(responseData, []string{"role.id", "id"}, &data.RoleID, true); err != nil {
-		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-		return
-	}
+	_ = responseData
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 

@@ -152,7 +152,7 @@
     "internal/provider/resources/group_role/data_source_group_role_acc_test.go": "8842bb2bdc7d0d718c390059f5f371c9b505353ca7cee8536577a9b7a06977b9",
     "internal/provider/resources/group_role/data_source_group_roles.go": "c2efc0496eee5c54fb9ab16c87243ea8127c4d323a9869b04517110d9c721c42",
     "internal/provider/resources/group_role/data_source_group_roles_acc_test.go": "8a496de1fef7a2c94100b1ec9bef6b3eea7fa2f29fd2058faab33be73ef53282",
-    "internal/provider/resources/group_role/resource_group_role.go": "3d2f6b1c4fe31b9203ae119b057db736b591cc06d04468e4343bc5af4242fab5",
+    "internal/provider/resources/group_role/resource_group_role.go": "1443e4603a655b714e93d6e499463592aef77fd271bc63300c3665f1c06a12a7",
     "internal/provider/resources/group_role/resource_group_role_acc_test.go": "a9c3dcec9e3c27de2df12e7f13ccb5c683e6f5103af743e7b2ab6c49e33e0b89",
     "internal/provider/resources/group_user/data_source_group_user.go": "2a44c8d13e7cae46adeebde0528c6948f2c78a7c2c780b1e3670e1f4643483d0",
     "internal/provider/resources/group_user/data_source_group_user_acc_test.go": "e02d57a4b6674474ee1b144f9d88406418ddd9196adf6cc20bdbee895c3f8281",
