@@ -161,9 +161,9 @@ func (d *ProjectRateLimitDataSource) Read(ctx context.Context, req datasource.Re
 		"project_id": data.ProjectID.ValueString(),
 	}
 	queryParams := map[string]string{
-		"limit": "100",
+		"limit": "1000",
 	}
-	responseData, err := d.client.PaginatedRequest(ctx, "GET", "/organization/projects/{project_id}/rate_limits", pathParams, queryParams)
+	responseData, err := d.client.CachedPaginatedRequest(ctx, "project_rate_limits", []string{"project_id"}, "GET", "/organization/projects/{project_id}/rate_limits", pathParams, queryParams)
 	if err != nil {
 		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
 		return
