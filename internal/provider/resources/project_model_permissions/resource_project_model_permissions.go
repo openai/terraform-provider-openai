@@ -126,7 +126,15 @@ func (r *ProjectModelPermissionsResource) Create(ctx context.Context, req resour
 		}
 		openaiapi.SetBodyField(body, []string{"model_ids"}, modelIDsValue)
 	}
+	if err := r.client.InvalidateResponseCache("project_rate_limits", []string{"project_id"}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	responseData, err := r.client.Request(ctx, "POST", "/organization/projects/{project_id}/model_permissions", pathParams, queryParams, body)
+	if err := r.client.InvalidateResponseCache("project_rate_limits", []string{"project_id"}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	if err != nil {
 		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
 		return
@@ -209,7 +217,15 @@ func (r *ProjectModelPermissionsResource) Update(ctx context.Context, req resour
 		}
 		openaiapi.SetBodyField(body, []string{"model_ids"}, modelIDsValue)
 	}
+	if err := r.client.InvalidateResponseCache("project_rate_limits", []string{"project_id"}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	responseData, err := r.client.Request(ctx, "POST", "/organization/projects/{project_id}/model_permissions", pathParams, queryParams, body)
+	if err := r.client.InvalidateResponseCache("project_rate_limits", []string{"project_id"}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	if err != nil {
 		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
 		return
@@ -243,7 +259,15 @@ func (r *ProjectModelPermissionsResource) Delete(ctx context.Context, req resour
 		"project_id": data.ProjectID.ValueString(),
 	}
 	queryParams := map[string]string{}
+	if err := r.client.InvalidateResponseCache("project_rate_limits", []string{"project_id"}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	responseData, err := r.client.Request(ctx, "DELETE", "/organization/projects/{project_id}/model_permissions", pathParams, queryParams, nil)
+	if err := r.client.InvalidateResponseCache("project_rate_limits", []string{"project_id"}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	if err != nil {
 		if openaiapi.IsNotFound(err) {
 			resp.State.RemoveResource(ctx)

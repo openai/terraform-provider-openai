@@ -3,6 +3,7 @@
 package openaiapi
 
 import (
+	"container/list"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -26,9 +28,198 @@ type APIClient struct {
 	Project         string
 	ProviderVersion string
 	Client          openai.Client
+	responseCache   responseCache
 }
 
 const maxPaginatedPages = 1000
+
+// Keep enough completed responses for Terraform's default parallelism of 10
+// while bounding the decoded project-list data retained by a provider process.
+const defaultResponseCacheMaxEntries = 32
+
+type responseCacheKey struct {
+	name   string
+	values string
+}
+
+type responseCacheEntry struct {
+	key         responseCacheKey
+	ready       chan struct{}
+	invalidated bool
+	evicted     bool
+	response    map[string]any
+	err         error
+	lruElement  *list.Element
+}
+
+type responseCache struct {
+	mu         sync.Mutex
+	entries    map[responseCacheKey]*responseCacheEntry
+	lru        list.List
+	maxEntries int
+
+	// testHookAfterLoadPublished makes the narrow publication/invalidation
+	// ordering deterministic in tests. It is nil in provider operation.
+	testHookAfterLoadPublished func(responseCacheKey)
+}
+
+func buildResponseCacheKey(name string, pathParams map[string]string, keyFields []string) (responseCacheKey, error) {
+	if strings.TrimSpace(name) == "" {
+		return responseCacheKey{}, fmt.Errorf("response cache name must not be empty")
+	}
+	if len(keyFields) == 0 {
+		return responseCacheKey{}, fmt.Errorf("response cache %q must define at least one key field", name)
+	}
+
+	var values strings.Builder
+	for _, field := range keyFields {
+		value, ok := pathParams[field]
+		if !ok {
+			return responseCacheKey{}, fmt.Errorf("response cache %q is missing path parameter %q", name, field)
+		}
+		_, _ = fmt.Fprintf(&values, "%d:%s=%d:%s;", len(field), field, len(value), value)
+	}
+	return responseCacheKey{name: name, values: values.String()}, nil
+}
+
+func (c *responseCache) acquire(key responseCacheKey) (*responseCacheEntry, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.entries == nil {
+		c.entries = make(map[responseCacheKey]*responseCacheEntry)
+	}
+	if entry, ok := c.entries[key]; ok {
+		if entry.lruElement != nil {
+			c.lru.MoveToFront(entry.lruElement)
+		}
+		return entry, true
+	}
+
+	entry := &responseCacheEntry{
+		key:   key,
+		ready: make(chan struct{}),
+	}
+	c.entries[key] = entry
+	return entry, false
+}
+
+func (c *responseCache) finishLoad(entry *responseCacheEntry, response map[string]any, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	entry.response = response
+	entry.err = err
+	if current, ok := c.entries[entry.key]; ok && current == entry {
+		if err != nil || entry.invalidated {
+			delete(c.entries, entry.key)
+		} else {
+			entry.lruElement = c.lru.PushFront(entry)
+			c.evictLocked()
+		}
+	}
+	close(entry.ready)
+}
+
+func (c *responseCache) evictLocked() {
+	maxEntries := c.maxEntries
+	if maxEntries <= 0 {
+		maxEntries = defaultResponseCacheMaxEntries
+	}
+	for c.lru.Len() > maxEntries {
+		oldest := c.lru.Back()
+		entry := oldest.Value.(*responseCacheEntry)
+		c.lru.Remove(oldest)
+		entry.lruElement = nil
+		entry.evicted = true
+		if current, ok := c.entries[entry.key]; ok && current == entry {
+			delete(c.entries, entry.key)
+		}
+	}
+}
+
+func (c *responseCache) result(ctx context.Context, entry *responseCacheEntry, retryLoaderCancellation bool) (map[string]any, error, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	loaderContextEnded := errors.Is(entry.err, context.Canceled) || errors.Is(entry.err, context.DeadlineExceeded)
+	if entry.invalidated || entry.evicted || (retryLoaderCancellation && ctx.Err() == nil && loaderContextEnded) {
+		return nil, nil, true
+	}
+	if entry.lruElement != nil {
+		c.lru.MoveToFront(entry.lruElement)
+	}
+	return entry.response, entry.err, false
+}
+
+func (c *responseCache) get(ctx context.Context, key responseCacheKey, load func(context.Context) (map[string]any, error)) (map[string]any, error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		entry, loaded := c.acquire(key)
+		if !loaded {
+			response, err := load(ctx)
+			c.finishLoad(entry, response, err)
+			if c.testHookAfterLoadPublished != nil {
+				c.testHookAfterLoadPublished(key)
+			}
+		} else {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-entry.ready:
+			}
+		}
+
+		response, err, retry := c.result(ctx, entry, loaded)
+		if retry {
+			continue
+		}
+		return response, err
+	}
+}
+
+func (c *responseCache) invalidate(key responseCacheKey) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	entry, ok := c.entries[key]
+	if !ok {
+		return
+	}
+	delete(c.entries, key)
+	if entry.lruElement != nil {
+		c.lru.Remove(entry.lruElement)
+		entry.lruElement = nil
+	}
+	entry.invalidated = true
+}
+
+// CachedPaginatedRequest coalesces concurrent cache misses and retains a bounded
+// set of recently used successful responses. Callers must treat the response as immutable.
+func (c *APIClient) CachedPaginatedRequest(ctx context.Context, cacheName string, cacheKeyFields []string, method string, path string, pathParams map[string]string, queryParams map[string]string) (map[string]any, error) {
+	if method != http.MethodGet {
+		return nil, fmt.Errorf("cached paginated requests require GET, got %q", method)
+	}
+	key, err := buildResponseCacheKey(cacheName, pathParams, cacheKeyFields)
+	if err != nil {
+		return nil, err
+	}
+	return c.responseCache.get(ctx, key, func(loadCtx context.Context) (map[string]any, error) {
+		return c.PaginatedRequest(loadCtx, method, path, pathParams, queryParams)
+	})
+}
+
+func (c *APIClient) InvalidateResponseCache(cacheName string, cacheKeyFields []string, pathParams map[string]string) error {
+	key, err := buildResponseCacheKey(cacheName, pathParams, cacheKeyFields)
+	if err != nil {
+		return err
+	}
+	c.responseCache.invalidate(key)
+	return nil
+}
 
 func IsNotFound(err error) bool {
 	var apiErr *openai.Error

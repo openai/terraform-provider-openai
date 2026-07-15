@@ -31,6 +31,7 @@ import (
 	resourceprojecthostedtoolpermissions "github.com/openai/terraform-provider-openai/internal/provider/resources/project_hosted_tool_permissions"
 	resourceprojectmodelpermissions "github.com/openai/terraform-provider-openai/internal/provider/resources/project_model_permissions"
 	resourceprojectratelimit "github.com/openai/terraform-provider-openai/internal/provider/resources/project_rate_limit"
+	resourceprojectratelimits "github.com/openai/terraform-provider-openai/internal/provider/resources/project_rate_limits"
 	resourceprojectrole "github.com/openai/terraform-provider-openai/internal/provider/resources/project_role"
 	resourceprojectserviceaccount "github.com/openai/terraform-provider-openai/internal/provider/resources/project_service_account"
 	resourceprojectspendalert "github.com/openai/terraform-provider-openai/internal/provider/resources/project_spend_alert"
@@ -158,6 +159,7 @@ func (p *OpenAIProvider) Resources(ctx context.Context) []func() resource.Resour
 		resourceprojectspendalert.NewProjectSpendAlertResource,
 		resourceorganizationspendalert.NewOrganizationSpendAlertResource,
 		resourceprojectratelimit.NewProjectRateLimitResource,
+		resourceprojectratelimits.NewProjectRateLimitsResource,
 		resourceprojectuser.NewProjectUserResource,
 		resourceprojectuserrole.NewProjectUserRoleResource,
 		resourceprojectgrouprole.NewProjectGroupRoleResource,

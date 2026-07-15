@@ -5,9 +5,14 @@ package openaiapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -26,7 +31,7 @@ func TestRequestExpandsPathQueryAndUserAgent(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"id": "group_1"})
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client := &APIClient{
 		ProviderVersion: "test",
@@ -63,7 +68,7 @@ func TestRequestRejectsPathDotSegments(t *testing.T) {
 		calls++
 		http.Error(w, "unexpected request", http.StatusInternalServerError)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client := &APIClient{
 		ProviderVersion: "test",
@@ -154,7 +159,7 @@ func TestPaginatedRequestFollowsNextCursor(t *testing.T) {
 			http.Error(w, "unexpected after cursor", http.StatusBadRequest)
 		}
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client := &APIClient{
 		ProviderVersion: "test",
@@ -191,7 +196,7 @@ func TestPaginatedRequestRejectsRepeatedCursor(t *testing.T) {
 			"next":     "cursor_1",
 		})
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client := &APIClient{
 		ProviderVersion: "test",
@@ -206,6 +211,449 @@ func TestPaginatedRequestRejectsRepeatedCursor(t *testing.T) {
 	)
 	if err == nil || !strings.Contains(err.Error(), "pagination cursor repeated") {
 		t.Fatalf("expected repeated cursor error, got %v", err)
+	}
+}
+
+func TestCachedPaginatedRequestCoalescesConcurrentCalls(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("after") {
+		case "":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data":     []map[string]any{{"id": "rl-1"}},
+				"has_more": true,
+				"next":     "rl-1",
+			})
+		case "rl-1":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data":     []map[string]any{{"id": "rl-2"}},
+				"has_more": false,
+			})
+		default:
+			http.Error(w, "unexpected after cursor", http.StatusBadRequest)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := &APIClient{
+		ProviderVersion: "test",
+		Client:          openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+	}
+	const workers = 32
+	start := make(chan struct{})
+	results := make(chan map[string]any, workers)
+	errors := make(chan error, workers)
+	var wait sync.WaitGroup
+	for range workers {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			response, err := client.CachedPaginatedRequest(
+				context.Background(),
+				"project_rate_limits",
+				[]string{"project_id"},
+				http.MethodGet,
+				"/organization/projects/{project_id}/rate_limits",
+				map[string]string{"project_id": "proj-1"},
+				map[string]string{"limit": "1"},
+			)
+			if err != nil {
+				errors <- err
+				return
+			}
+			results <- response
+		}()
+	}
+	close(start)
+	wait.Wait()
+	close(results)
+	close(errors)
+
+	for err := range errors {
+		t.Fatalf("CachedPaginatedRequest returned error: %v", err)
+	}
+	for response := range results {
+		items, err := ResponseObjectList(response, "data", true)
+		if err != nil || len(items) != 2 {
+			t.Fatalf("unexpected cached response: %#v, err=%v", response, err)
+		}
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("expected one two-page traversal, got %d requests", calls.Load())
+	}
+}
+
+func TestCachedPaginatedRequestRetriesAfterInFlightInvalidation(t *testing.T) {
+	var calls atomic.Int64
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var releaseFirstOnce sync.Once
+	release := func() { releaseFirstOnce.Do(func() { close(releaseFirst) }) }
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		call := calls.Add(1)
+		if call == 1 {
+			close(firstStarted)
+			<-releaseFirst
+		}
+		w.Header().Set("Content-Type", "application/json")
+		id := "rl-new"
+		if call == 1 {
+			id = "rl-old"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data":     []map[string]any{{"id": id}},
+			"has_more": false,
+		})
+	}))
+	t.Cleanup(server.Close)
+	t.Cleanup(release)
+
+	client := &APIClient{
+		ProviderVersion: "test",
+		Client:          openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+	}
+	pathParams := map[string]string{"project_id": "proj-1"}
+	load := func() (map[string]any, error) {
+		return client.CachedPaginatedRequest(
+			context.Background(),
+			"project_rate_limits",
+			[]string{"project_id"},
+			http.MethodGet,
+			"/organization/projects/{project_id}/rate_limits",
+			pathParams,
+			map[string]string{"limit": "1000"},
+		)
+	}
+	firstResult := make(chan map[string]any, 1)
+	firstError := make(chan error, 1)
+	go func() {
+		response, err := load()
+		firstResult <- response
+		firstError <- err
+	}()
+	<-firstStarted
+
+	if err := client.InvalidateResponseCache(
+		"project_rate_limits", []string{"project_id"}, pathParams,
+	); err != nil {
+		t.Fatalf("InvalidateResponseCache returned error: %v", err)
+	}
+	second, err := load()
+	release()
+	if err != nil {
+		t.Fatalf("second CachedPaginatedRequest returned error: %v", err)
+	}
+	first := <-firstResult
+	if err := <-firstError; err != nil {
+		t.Fatalf("first CachedPaginatedRequest returned error: %v", err)
+	}
+
+	for name, response := range map[string]map[string]any{"first": first, "second": second} {
+		items, err := ResponseObjectList(response, "data", true)
+		if err != nil || len(items) != 1 || items[0]["id"] != "rl-new" {
+			t.Fatalf("%s request returned stale data: %#v, err=%v", name, response, err)
+		}
+	}
+	third, err := load()
+	if err != nil {
+		t.Fatalf("third CachedPaginatedRequest returned error: %v", err)
+	}
+	items, err := ResponseObjectList(third, "data", true)
+	if err != nil || len(items) != 1 || items[0]["id"] != "rl-new" {
+		t.Fatalf("third request returned unexpected data: %#v, err=%v", third, err)
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("expected two traversals across invalidation, got %d requests", calls.Load())
+	}
+}
+
+func TestResponseCacheRetriesAfterLateInvalidation(t *testing.T) {
+	cache := &responseCache{}
+	key := responseCacheKey{name: "project_rate_limits", values: "proj-1"}
+	var loads atomic.Int64
+	cache.testHookAfterLoadPublished = func(publishedKey responseCacheKey) {
+		if publishedKey == key && loads.Load() == 1 {
+			cache.invalidate(key)
+		}
+	}
+
+	response, err := cache.get(context.Background(), key, func(context.Context) (map[string]any, error) {
+		load := loads.Add(1)
+		id := "rl-new"
+		if load == 1 {
+			id = "rl-old"
+		}
+		return map[string]any{"data": []any{map[string]any{"id": id}}}, nil
+	})
+	if err != nil {
+		t.Fatalf("response cache get returned error: %v", err)
+	}
+	items, err := ResponseObjectList(response, "data", true)
+	if err != nil || len(items) != 1 || items[0]["id"] != "rl-new" {
+		t.Fatalf("late invalidation returned stale data: %#v, err=%v", response, err)
+	}
+	if loads.Load() != 2 {
+		t.Fatalf("expected late invalidation to force one retry, got %d loads", loads.Load())
+	}
+}
+
+func TestResponseCacheEvictsLeastRecentlyUsedEntry(t *testing.T) {
+	cache := &responseCache{maxEntries: 2}
+	loads := map[string]int{}
+	read := func(projectID string) {
+		t.Helper()
+		key := responseCacheKey{name: "project_rate_limits", values: projectID}
+		_, err := cache.get(context.Background(), key, func(context.Context) (map[string]any, error) {
+			loads[projectID]++
+			return map[string]any{"project_id": projectID}, nil
+		})
+		if err != nil {
+			t.Fatalf("cache read for %s returned error: %v", projectID, err)
+		}
+	}
+
+	read("proj-a")
+	read("proj-b")
+	read("proj-a")
+	read("proj-c")
+	read("proj-a")
+	read("proj-b")
+
+	if loads["proj-a"] != 1 || loads["proj-b"] != 2 || loads["proj-c"] != 1 {
+		t.Fatalf("unexpected loads after LRU eviction: %#v", loads)
+	}
+	cache.mu.Lock()
+	retainedEntries := cache.lru.Len()
+	trackedEntries := len(cache.entries)
+	cache.mu.Unlock()
+	if retainedEntries != 2 || trackedEntries != 2 {
+		t.Fatalf("expected cache to retain two completed entries, got lru=%d tracked=%d", retainedEntries, trackedEntries)
+	}
+}
+
+func TestResponseCacheRetriesReaderOfEvictedEntry(t *testing.T) {
+	cache := &responseCache{maxEntries: 1}
+	keyA := responseCacheKey{name: "project_rate_limits", values: "proj-a"}
+	keyB := responseCacheKey{name: "project_rate_limits", values: "proj-b"}
+	entryA, loaded := cache.acquire(keyA)
+	if loaded {
+		t.Fatal("expected project A to start as a cache miss")
+	}
+	cache.finishLoad(entryA, map[string]any{"project_id": "proj-a"}, nil)
+	acquiredA, loaded := cache.acquire(keyA)
+	if !loaded || acquiredA != entryA {
+		t.Fatal("expected project A to be acquired from the cache")
+	}
+
+	entryB, loaded := cache.acquire(keyB)
+	if loaded {
+		t.Fatal("expected project B to start as a cache miss")
+	}
+	cache.finishLoad(entryB, map[string]any{"project_id": "proj-b"}, nil)
+	cache.invalidate(keyA)
+
+	if _, _, retry := cache.result(context.Background(), acquiredA, true); !retry {
+		t.Fatal("expected a reader of an evicted entry to retry")
+	}
+}
+
+func TestResponseCacheDoesNotCacheErrors(t *testing.T) {
+	cache := &responseCache{}
+	key := responseCacheKey{name: "project_rate_limits", values: "proj-1"}
+	loads := 0
+	load := func(context.Context) (map[string]any, error) {
+		loads++
+		if loads == 1 {
+			return nil, context.Canceled
+		}
+		return map[string]any{"data": []any{}}, nil
+	}
+
+	if _, err := cache.get(context.Background(), key, load); err == nil {
+		t.Fatal("expected first cache load to fail")
+	}
+	if _, err := cache.get(context.Background(), key, load); err != nil {
+		t.Fatalf("expected failed load to be retried, got %v", err)
+	}
+	if loads != 2 {
+		t.Fatalf("expected two loads, got %d", loads)
+	}
+}
+
+type observedDoneContext struct {
+	context.Context
+	once     sync.Once
+	observed chan struct{}
+}
+
+func (c *observedDoneContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.observed) })
+	return c.Context.Done()
+}
+
+func TestResponseCacheRetriesWhenLoaderContextIsCanceled(t *testing.T) {
+	cache := &responseCache{}
+	key := responseCacheKey{name: "project_rate_limits", values: "proj-1"}
+	firstContext, cancelFirst := context.WithCancel(context.Background())
+	t.Cleanup(cancelFirst)
+	firstStarted := make(chan struct{})
+	firstError := make(chan error, 1)
+	go func() {
+		_, err := cache.get(firstContext, key, func(ctx context.Context) (map[string]any, error) {
+			close(firstStarted)
+			<-ctx.Done()
+			return nil, ctx.Err()
+		})
+		firstError <- err
+	}()
+	<-firstStarted
+
+	waiterObserved := make(chan struct{})
+	waiterContext := &observedDoneContext{
+		Context:  context.Background(),
+		observed: waiterObserved,
+	}
+	waiterResult := make(chan map[string]any, 1)
+	waiterError := make(chan error, 1)
+	loads := atomic.Int64{}
+	go func() {
+		response, err := cache.get(waiterContext, key, func(context.Context) (map[string]any, error) {
+			loads.Add(1)
+			return map[string]any{"data": []any{map[string]any{"id": "rl-fresh"}}}, nil
+		})
+		waiterResult <- response
+		waiterError <- err
+	}()
+	<-waiterObserved
+
+	cancelFirst()
+	if err := <-firstError; !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled first load, got %v", err)
+	}
+	response := <-waiterResult
+	if err := <-waiterError; err != nil {
+		t.Fatalf("live waiter inherited loader cancellation: %v", err)
+	}
+	items, err := ResponseObjectList(response, "data", true)
+	if err != nil || len(items) != 1 || items[0]["id"] != "rl-fresh" {
+		t.Fatalf("live waiter returned unexpected response: %#v, err=%v", response, err)
+	}
+	if loads.Load() != 1 {
+		t.Fatalf("expected one retry by the live waiter, got %d", loads.Load())
+	}
+}
+
+func TestResponseCacheKeysAreIsolatedDuringInvalidation(t *testing.T) {
+	cache := &responseCache{}
+	keyForProject := func(projectID string) responseCacheKey {
+		t.Helper()
+		key, err := buildResponseCacheKey(
+			"project_rate_limits",
+			map[string]string{"project_id": projectID},
+			[]string{"project_id"},
+		)
+		if err != nil {
+			t.Fatalf("buildResponseCacheKey returned error: %v", err)
+		}
+		return key
+	}
+	keyA := keyForProject("proj-a")
+	keyB := keyForProject("proj-b")
+	loads := map[string]int{}
+	read := func(key responseCacheKey, projectID string) {
+		t.Helper()
+		_, err := cache.get(context.Background(), key, func(context.Context) (map[string]any, error) {
+			loads[projectID]++
+			return map[string]any{"project_id": projectID}, nil
+		})
+		if err != nil {
+			t.Fatalf("cache read for %s returned error: %v", projectID, err)
+		}
+	}
+
+	read(keyA, "proj-a")
+	read(keyB, "proj-b")
+	read(keyA, "proj-a")
+	read(keyB, "proj-b")
+	cache.invalidate(keyA)
+	read(keyA, "proj-a")
+	read(keyB, "proj-b")
+
+	if loads["proj-a"] != 2 || loads["proj-b"] != 1 {
+		t.Fatalf("unexpected per-project cache loads: %#v", loads)
+	}
+}
+
+func BenchmarkResponseCacheRetainedHeap(b *testing.B) {
+	const rateLimitsPerProject = 3000
+	b.ReportAllocs()
+
+	for range b.N {
+		cache := &responseCache{}
+		runtime.GC()
+		var before runtime.MemStats
+		runtime.ReadMemStats(&before)
+
+		for project := 0; project < defaultResponseCacheMaxEntries+1; project++ {
+			limits := make([]any, rateLimitsPerProject)
+			for limit := range rateLimitsPerProject {
+				limits[limit] = map[string]any{
+					"object":                           "project.rate_limit",
+					"id":                               fmt.Sprintf("rl-%d-%d", project, limit),
+					"model":                            fmt.Sprintf("model-%d-%d", project, limit),
+					"max_requests_per_1_minute":        float64(limit + 1),
+					"max_tokens_per_1_minute":          float64((limit + 1) * 1000),
+					"max_images_per_1_minute":          nil,
+					"max_audio_megabytes_per_1_minute": nil,
+					"max_requests_per_1_day":           nil,
+					"batch_1_day_max_input_tokens":     float64((limit + 1) * 10000),
+				}
+			}
+			key := responseCacheKey{
+				name:   "project_rate_limits",
+				values: fmt.Sprintf("proj-%d", project),
+			}
+			payload, err := json.Marshal(map[string]any{
+				"object":   "list",
+				"data":     limits,
+				"has_more": false,
+				"next":     nil,
+			})
+			if err != nil {
+				b.Fatalf("marshal representative response: %v", err)
+			}
+			var response map[string]any
+			if err := json.Unmarshal(payload, &response); err != nil {
+				b.Fatalf("unmarshal representative response: %v", err)
+			}
+			if _, err := cache.get(context.Background(), key, func(context.Context) (map[string]any, error) {
+				return response, nil
+			}); err != nil {
+				b.Fatalf("cache load returned error: %v", err)
+			}
+		}
+
+		runtime.GC()
+		var after runtime.MemStats
+		runtime.ReadMemStats(&after)
+		cache.mu.Lock()
+		retainedEntries := cache.lru.Len()
+		cache.mu.Unlock()
+		if retainedEntries != defaultResponseCacheMaxEntries {
+			b.Fatalf("expected %d retained entries, got %d", defaultResponseCacheMaxEntries, retainedEntries)
+		}
+
+		retainedBytes := int64(after.HeapAlloc) - int64(before.HeapAlloc)
+		if retainedBytes < 0 {
+			retainedBytes = 0
+		}
+		b.ReportMetric(float64(retainedBytes)/(1024*1024), "retained-MiB")
+		b.ReportMetric(float64(retainedBytes)/float64(retainedEntries), "retained-B/entry")
+		b.ReportMetric(float64(retainedEntries), "retained-entries")
+		runtime.KeepAlive(cache)
 	}
 }
 

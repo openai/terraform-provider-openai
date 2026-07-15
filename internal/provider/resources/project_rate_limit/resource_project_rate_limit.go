@@ -178,7 +178,15 @@ func (r *ProjectRateLimitResource) Create(ctx context.Context, req resource.Crea
 	openaiapi.AddInt64BodyField(body, "max_audio_megabytes_per_1_minute", data.MaxAudioMegabytesPer1Minute)
 	openaiapi.AddInt64BodyField(body, "max_requests_per_1_day", data.MaxRequestsPer1Day)
 	openaiapi.AddInt64BodyField(body, "batch_1_day_max_input_tokens", data.Batch1DayMaxInputTokens)
+	if err := r.client.InvalidateResponseCache("project_rate_limits", []string{"project_id"}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	responseData, err := r.client.Request(ctx, "POST", "/organization/projects/{project_id}/rate_limits/{rate_limit_id}", pathParams, queryParams, body)
+	if err := r.client.InvalidateResponseCache("project_rate_limits", []string{"project_id"}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	if err != nil {
 		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
 		return
@@ -236,9 +244,9 @@ func (r *ProjectRateLimitResource) Read(ctx context.Context, req resource.ReadRe
 		"project_id": data.ProjectID.ValueString(),
 	}
 	queryParams := map[string]string{
-		"limit": "100",
+		"limit": "1000",
 	}
-	responseData, err := r.client.PaginatedRequest(ctx, "GET", "/organization/projects/{project_id}/rate_limits", pathParams, queryParams)
+	responseData, err := r.client.CachedPaginatedRequest(ctx, "project_rate_limits", []string{"project_id"}, "GET", "/organization/projects/{project_id}/rate_limits", pathParams, queryParams)
 	if err != nil {
 		if openaiapi.IsNotFound(err) {
 			resp.State.RemoveResource(ctx)
@@ -319,7 +327,15 @@ func (r *ProjectRateLimitResource) Update(ctx context.Context, req resource.Upda
 	openaiapi.AddInt64BodyField(body, "max_audio_megabytes_per_1_minute", data.MaxAudioMegabytesPer1Minute)
 	openaiapi.AddInt64BodyField(body, "max_requests_per_1_day", data.MaxRequestsPer1Day)
 	openaiapi.AddInt64BodyField(body, "batch_1_day_max_input_tokens", data.Batch1DayMaxInputTokens)
+	if err := r.client.InvalidateResponseCache("project_rate_limits", []string{"project_id"}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	responseData, err := r.client.Request(ctx, "POST", "/organization/projects/{project_id}/rate_limits/{rate_limit_id}", pathParams, queryParams, body)
+	if err := r.client.InvalidateResponseCache("project_rate_limits", []string{"project_id"}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	if err != nil {
 		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
 		return
