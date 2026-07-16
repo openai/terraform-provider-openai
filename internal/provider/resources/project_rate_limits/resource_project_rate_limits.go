@@ -63,7 +63,8 @@ func (r *ProjectRateLimitsResource) Metadata(ctx context.Context, req resource.M
 
 func (r *ProjectRateLimitsResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manage existing project rate limits as one resource per project.",
+		MarkdownDescription: "Deprecated. Manage existing project rate limits as one resource per project. Use openai_project_rate_limit instead; this resource will be removed in provider v1.0.0.",
+		DeprecationMessage:  "openai_project_rate_limits is deprecated. Use one openai_project_rate_limit resource per managed rate limit instead. This resource will be removed in provider v1.0.0.",
 		Attributes: map[string]schema.Attribute{
 			"project_id": schema.StringAttribute{
 				MarkdownDescription: "Project whose rate limits are managed.",

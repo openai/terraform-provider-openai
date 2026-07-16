@@ -33,9 +33,9 @@ type APIClient struct {
 
 const maxPaginatedPages = 1000
 
-// Keep enough completed responses for Terraform's default parallelism of 10
-// while bounding the decoded project-list data retained by a provider process.
-const defaultResponseCacheMaxEntries = 32
+// Keep a production-sized project working set so Terraform's interleaved
+// refresh order can reuse paginated responses while retaining a fixed bound.
+const defaultResponseCacheMaxEntries = 2048
 
 type responseCacheKey struct {
 	name   string

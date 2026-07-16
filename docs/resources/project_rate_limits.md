@@ -3,12 +3,12 @@
 page_title: "openai_project_rate_limits Resource - openai"
 subcategory: ""
 description: |-
-  Manage existing project rate limits as one resource per project.
+  Deprecated. Manage existing project rate limits as one resource per project. Use openai_project_rate_limit instead; this resource will be removed in provider v1.0.0.
 ---
 
 # openai_project_rate_limits (Resource)
 
-Manage existing project rate limits as one resource per project.
+Deprecated. Manage existing project rate limits as one resource per project. Use openai_project_rate_limit instead; this resource will be removed in provider v1.0.0.
 
 ## Example Usage
 
