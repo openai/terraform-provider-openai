@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/openai/terraform-provider-openai/compare/v0.5.0...v0.6.0) (2026-07-16)
+
+
+### Features
+
+* retain cache working set and deprecate aggregate rate limits ([#27](https://github.com/openai/terraform-provider-openai/issues/27)) ([f49becb](https://github.com/openai/terraform-provider-openai/commit/f49becbd52301b65bcb1907c18531f08d69add69))
+
 ## [0.5.0](https://github.com/openai/terraform-provider-openai/compare/v0.4.1...v0.5.0) (2026-07-15)
 
 
