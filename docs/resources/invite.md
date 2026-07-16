@@ -14,7 +14,7 @@ Manage an organization invite.
 
 ```terraform
 resource "openai_invite" "example" {
-  email    = "example_email"
+  email    = "terraform@example.com"
   role     = "owner"
   projects = []
 }

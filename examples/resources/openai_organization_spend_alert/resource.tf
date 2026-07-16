@@ -3,5 +3,5 @@ resource "openai_organization_spend_alert" "example" {
   currency                        = "USD"
   interval                        = "month"
   notification_channel_type       = "email"
-  notification_channel_recipients = ["api.organization.read"]
+  notification_channel_recipients = ["terraform@example.com"]
 }
