@@ -25,6 +25,8 @@ type ProjectGroupResource struct {
 	client *openaiapi.APIClient
 }
 
+const projectGroupsResponseCacheName = "project_groups"
+
 type ProjectGroupResourceModel struct {
 	ProjectID types.String `tfsdk:"project_id"`
 	GroupID   types.String `tfsdk:"group_id"`
@@ -147,7 +149,15 @@ func (r *ProjectGroupResource) Create(ctx context.Context, req resource.CreateRe
 	body := map[string]any{}
 	openaiapi.AddStringBodyField(body, "group_id", data.GroupID)
 	openaiapi.AddStringBodyField(body, "role", data.Role)
+	if err := r.invalidateProjectGroupsResponseCache(data.ProjectID.ValueString()); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	responseData, err := r.client.Request(ctx, "POST", "/organization/projects/{project_id}/groups", pathParams, queryParams, body)
+	if cacheErr := r.invalidateProjectGroupsResponseCache(data.ProjectID.ValueString()); cacheErr != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", cacheErr.Error())
+		return
+	}
 	if err != nil {
 		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
 		return
@@ -185,18 +195,17 @@ func (r *ProjectGroupResource) Read(ctx context.Context, req resource.ReadReques
 		resp.Diagnostics.AddError("Missing OpenAI API client", "The provider was not configured before this operation ran.")
 		return
 	}
-	pathParams := map[string]string{
-		"project_id": data.ProjectID.ValueString(),
-		"group_id":   data.GroupID.ValueString(),
-	}
-	queryParams := map[string]string{}
-	responseData, err := r.client.Request(ctx, "GET", "/organization/projects/{project_id}/groups/{group_id}", pathParams, queryParams, nil)
+	responseData, found, err := r.readProjectGroup(ctx, data.ProjectID.ValueString(), data.GroupID.ValueString())
 	if err != nil {
 		if openaiapi.IsNotFound(err) {
 			resp.State.RemoveResource(ctx)
 			return
 		}
 		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
+		return
+	}
+	if !found {
+		resp.State.RemoveResource(ctx)
 		return
 	}
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"project_id"}, &data.ProjectID, false); err != nil {
@@ -251,7 +260,15 @@ func (r *ProjectGroupResource) Delete(ctx context.Context, req resource.DeleteRe
 		"group_id":   data.GroupID.ValueString(),
 	}
 	queryParams := map[string]string{}
+	if err := r.invalidateProjectGroupsResponseCache(data.ProjectID.ValueString()); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	responseData, err := r.client.Request(ctx, "DELETE", "/organization/projects/{project_id}/groups/{group_id}", pathParams, queryParams, nil)
+	if cacheErr := r.invalidateProjectGroupsResponseCache(data.ProjectID.ValueString()); cacheErr != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", cacheErr.Error())
+		return
+	}
 	if err != nil {
 		if openaiapi.IsNotFound(err) {
 			resp.State.RemoveResource(ctx)
@@ -262,6 +279,24 @@ func (r *ProjectGroupResource) Delete(ctx context.Context, req resource.DeleteRe
 	}
 	_ = responseData
 	resp.State.RemoveResource(ctx)
+}
+
+func (r *ProjectGroupResource) readProjectGroup(ctx context.Context, projectID string, groupID string) (map[string]any, bool, error) {
+	pathParams := map[string]string{
+		"project_id": projectID,
+	}
+	queryParams := map[string]string{
+		"limit": "100",
+	}
+	responseData, err := r.client.CachedPaginatedRequest(ctx, projectGroupsResponseCacheName, []string{"project_id"}, "GET", "/organization/projects/{project_id}/groups", pathParams, queryParams)
+	if err != nil {
+		return nil, false, err
+	}
+	return openaiapi.ResponseObjectByField(responseData, "data", "group_id", groupID)
+}
+
+func (r *ProjectGroupResource) invalidateProjectGroupsResponseCache(projectID string) error {
+	return r.client.InvalidateResponseCache(projectGroupsResponseCacheName, []string{"project_id"}, map[string]string{"project_id": projectID})
 }
 
 func (r *ProjectGroupResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
