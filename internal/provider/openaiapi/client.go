@@ -67,9 +67,6 @@ func buildResponseCacheKey(name string, pathParams map[string]string, keyFields 
 	if strings.TrimSpace(name) == "" {
 		return responseCacheKey{}, fmt.Errorf("response cache name must not be empty")
 	}
-	if len(keyFields) == 0 {
-		return responseCacheKey{}, fmt.Errorf("response cache %q must define at least one key field", name)
-	}
 
 	var values strings.Builder
 	for _, field := range keyFields {
@@ -198,7 +195,8 @@ func (c *responseCache) invalidate(key responseCacheKey) {
 }
 
 // CachedPaginatedRequest coalesces concurrent cache misses and retains a bounded
-// set of recently used successful responses. Callers must treat the response as immutable.
+// set of recently used successful responses. An empty cacheKeyFields slice creates
+// one entry per API client and cache name. Callers must treat the response as immutable.
 func (c *APIClient) CachedPaginatedRequest(ctx context.Context, cacheName string, cacheKeyFields []string, method string, path string, pathParams map[string]string, queryParams map[string]string) (map[string]any, error) {
 	if method != http.MethodGet {
 		return nil, fmt.Errorf("cached paginated requests require GET, got %q", method)

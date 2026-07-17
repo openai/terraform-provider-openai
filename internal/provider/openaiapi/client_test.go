@@ -286,6 +286,59 @@ func TestCachedPaginatedRequestCoalescesConcurrentCalls(t *testing.T) {
 	}
 }
 
+func TestCachedPaginatedRequestSupportsSingletonCache(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data":     []map[string]any{{"id": "proj-1"}},
+			"has_more": false,
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	client := &APIClient{
+		ProviderVersion: "test",
+		Client:          openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+	}
+	load := func() (map[string]any, error) {
+		return client.CachedPaginatedRequest(
+			context.Background(),
+			"organization_projects",
+			nil,
+			http.MethodGet,
+			"/organization/projects",
+			map[string]string{},
+			map[string]string{"limit": "100"},
+		)
+	}
+
+	for range 2 {
+		response, err := load()
+		if err != nil {
+			t.Fatalf("CachedPaginatedRequest returned error: %v", err)
+		}
+		items, err := ResponseObjectList(response, "data", true)
+		if err != nil || len(items) != 1 || items[0]["id"] != "proj-1" {
+			t.Fatalf("unexpected cached response: %#v, err=%v", response, err)
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("expected one singleton cache load, got %d requests", calls.Load())
+	}
+
+	if err := client.InvalidateResponseCache("organization_projects", nil, map[string]string{}); err != nil {
+		t.Fatalf("InvalidateResponseCache returned error: %v", err)
+	}
+	if _, err := load(); err != nil {
+		t.Fatalf("CachedPaginatedRequest after invalidation returned error: %v", err)
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("expected singleton cache invalidation to reload, got %d requests", calls.Load())
+	}
+}
+
 func TestCachedPaginatedRequestRetriesAfterInFlightInvalidation(t *testing.T) {
 	var calls atomic.Int64
 	firstStarted := make(chan struct{})
