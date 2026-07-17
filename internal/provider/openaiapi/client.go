@@ -10,13 +10,16 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 )
@@ -29,9 +32,25 @@ type APIClient struct {
 	ProviderVersion string
 	Client          openai.Client
 	responseCache   responseCache
+
+	// The following fields are test hooks. Provider operation uses the bounded
+	// defaults below.
+	requestTimeout       time.Duration
+	slowRequestThreshold time.Duration
+	requestMaxRetries    *int
+	requestObserver      func(requestObservation)
 }
 
 const maxPaginatedPages = 1000
+
+const (
+	defaultRequestTimeout       = 2 * time.Minute
+	defaultSlowRequestThreshold = 30 * time.Second
+	defaultRequestMaxRetries    = 2
+	requestObservationPending   = "retry_lifecycle_pending"
+	requestObservationLifecycle = "retry_lifecycle_completed"
+	requestObservationAttempt   = "attempt_completed"
+)
 
 // Keep a production-sized project working set so Terraform's interleaved
 // refresh order can reuse paginated responses while retaining a fixed bound.
@@ -49,7 +68,18 @@ type responseCacheEntry struct {
 	evicted     bool
 	response    map[string]any
 	err         error
+	loaderEnded bool
 	lruElement  *list.Element
+}
+
+type requestObservation struct {
+	Phase      string
+	Method     string
+	Path       string
+	Duration   time.Duration
+	RetryCount int
+	StatusCode int
+	TimedOut   bool
 }
 
 type responseCache struct {
@@ -104,12 +134,13 @@ func (c *responseCache) acquire(key responseCacheKey) (*responseCacheEntry, bool
 	return entry, false
 }
 
-func (c *responseCache) finishLoad(entry *responseCacheEntry, response map[string]any, err error) {
+func (c *responseCache) finishLoad(entry *responseCacheEntry, response map[string]any, err error, loaderEnded bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	entry.response = response
 	entry.err = err
+	entry.loaderEnded = loaderEnded
 	if current, ok := c.entries[entry.key]; ok && current == entry {
 		if err != nil || entry.invalidated {
 			delete(c.entries, entry.key)
@@ -142,8 +173,7 @@ func (c *responseCache) result(ctx context.Context, entry *responseCacheEntry, r
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	loaderContextEnded := errors.Is(entry.err, context.Canceled) || errors.Is(entry.err, context.DeadlineExceeded)
-	if entry.invalidated || entry.evicted || (retryLoaderCancellation && ctx.Err() == nil && loaderContextEnded) {
+	if entry.invalidated || entry.evicted || (retryLoaderCancellation && ctx.Err() == nil && entry.loaderEnded) {
 		return nil, nil, true
 	}
 	if entry.lruElement != nil {
@@ -161,7 +191,7 @@ func (c *responseCache) get(ctx context.Context, key responseCacheKey, load func
 		entry, loaded := c.acquire(key)
 		if !loaded {
 			response, err := load(ctx)
-			c.finishLoad(entry, response, err)
+			c.finishLoad(entry, response, err, ctx.Err() != nil)
 			if c.testHookAfterLoadPublished != nil {
 				c.testHookAfterLoadPublished(key)
 			}
@@ -283,13 +313,91 @@ func copyQueryParams(queryParams map[string]string) map[string]string {
 	return copy
 }
 
-func (c *APIClient) requestOptions() []option.RequestOption {
+func (c *APIClient) effectiveRequestTimeout() time.Duration {
+	if c.requestTimeout > 0 {
+		return c.requestTimeout
+	}
+	return defaultRequestTimeout
+}
+
+func (c *APIClient) effectiveSlowRequestThreshold() time.Duration {
+	if c.slowRequestThreshold > 0 {
+		return c.slowRequestThreshold
+	}
+	return defaultSlowRequestThreshold
+}
+
+func (c *APIClient) effectiveRequestMaxRetries() int {
+	if c.requestMaxRetries != nil {
+		return *c.requestMaxRetries
+	}
+	return defaultRequestMaxRetries
+}
+
+func requestRetryCount(request *http.Request) int {
+	retryCount, err := strconv.Atoi(request.Header.Get("X-Stainless-Retry-Count"))
+	if err != nil || retryCount < 0 {
+		return 0
+	}
+	return retryCount
+}
+
+func (c *APIClient) recordRequestObservation(ctx context.Context, observation requestObservation) {
+	fields := map[string]any{
+		"method":      observation.Method,
+		"path":        observation.Path,
+		"phase":       observation.Phase,
+		"duration_ms": observation.Duration.Milliseconds(),
+		"retry_count": observation.RetryCount,
+		"status_code": observation.StatusCode,
+		"timed_out":   observation.TimedOut,
+	}
+	switch {
+	case observation.Phase == requestObservationPending:
+		tflog.Warn(ctx, "OpenAI API request is still pending", fields)
+	case observation.Phase == requestObservationLifecycle && (observation.TimedOut || observation.Duration >= c.effectiveSlowRequestThreshold()):
+		tflog.Warn(ctx, "OpenAI API retry lifecycle completed after delay or timeout", fields)
+	case observation.Phase == requestObservationAttempt && (observation.TimedOut || observation.Duration >= c.effectiveSlowRequestThreshold() || observation.RetryCount > 0 || observation.StatusCode == http.StatusTooManyRequests || observation.StatusCode >= http.StatusInternalServerError):
+		tflog.Warn(ctx, "OpenAI API request attempt completed after delay or retry", fields)
+	default:
+		tflog.Debug(ctx, "OpenAI API request completed", fields)
+	}
+	if c.requestObserver != nil {
+		c.requestObserver(observation)
+	}
+}
+
+func (c *APIClient) requestTelemetryMiddleware(ctx context.Context, method string, path string) option.Middleware {
+	return func(request *http.Request, next option.MiddlewareNext) (*http.Response, error) {
+		startedAt := time.Now()
+		retryCount := requestRetryCount(request)
+
+		response, err := next(request)
+		observation := requestObservation{
+			Phase:      requestObservationAttempt,
+			Method:     method,
+			Path:       path,
+			Duration:   time.Since(startedAt),
+			RetryCount: retryCount,
+			TimedOut:   errors.Is(err, context.DeadlineExceeded) || errors.Is(request.Context().Err(), context.DeadlineExceeded),
+		}
+		if response != nil {
+			observation.StatusCode = response.StatusCode
+		}
+		c.recordRequestObservation(ctx, observation)
+		return response, err
+	}
+}
+
+func (c *APIClient) requestOptions(ctx context.Context, method string, path string) []option.RequestOption {
 	version := strings.TrimSpace(c.ProviderVersion)
 	if version == "" {
 		version = "dev"
 	}
 	return []option.RequestOption{
 		option.WithHeader("User-Agent", "terraform-provider-openai/"+version),
+		option.WithMaxRetries(c.effectiveRequestMaxRetries()),
+		option.WithMiddleware(c.requestTelemetryMiddleware(ctx, method, path)),
 	}
 }
 
@@ -300,24 +408,48 @@ func (c *APIClient) Request(ctx context.Context, method string, path string, pat
 	}
 	expandedPath = appendQuery(expandedPath, queryParams)
 
-	requestOptions := c.requestOptions()
+	requestTimeout := c.effectiveRequestTimeout()
+	requestContext, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+	requestStartedAt := time.Now()
+	slowThreshold := c.effectiveSlowRequestThreshold()
+	pendingTimer := time.AfterFunc(slowThreshold, func() {
+		c.recordRequestObservation(ctx, requestObservation{
+			Phase:    requestObservationPending,
+			Method:   method,
+			Path:     path,
+			Duration: slowThreshold,
+		})
+	})
+	defer pendingTimer.Stop()
+	requestOptions := c.requestOptions(ctx, method, path)
 
 	var response map[string]any
 	switch method {
 	case http.MethodGet:
-		err = c.Client.Get(ctx, expandedPath, nil, &response, requestOptions...)
+		err = c.Client.Get(requestContext, expandedPath, nil, &response, requestOptions...)
 	case http.MethodPost:
-		err = c.Client.Post(ctx, expandedPath, body, &response, requestOptions...)
+		err = c.Client.Post(requestContext, expandedPath, body, &response, requestOptions...)
 	case http.MethodPut:
-		err = c.Client.Put(ctx, expandedPath, body, &response, requestOptions...)
+		err = c.Client.Put(requestContext, expandedPath, body, &response, requestOptions...)
 	case http.MethodPatch:
-		err = c.Client.Patch(ctx, expandedPath, body, &response, requestOptions...)
+		err = c.Client.Patch(requestContext, expandedPath, body, &response, requestOptions...)
 	case http.MethodDelete:
-		err = c.Client.Delete(ctx, expandedPath, nil, &response, requestOptions...)
+		err = c.Client.Delete(requestContext, expandedPath, nil, &response, requestOptions...)
 	default:
 		return nil, fmt.Errorf("unsupported OpenAI API method %q", method)
 	}
+	c.recordRequestObservation(ctx, requestObservation{
+		Phase:    requestObservationLifecycle,
+		Method:   method,
+		Path:     path,
+		Duration: time.Since(requestStartedAt),
+		TimedOut: errors.Is(requestContext.Err(), context.DeadlineExceeded),
+	})
 	if err != nil {
+		if ctx.Err() == nil && errors.Is(requestContext.Err(), context.DeadlineExceeded) {
+			return nil, fmt.Errorf("OpenAI API request exceeded the %s retry-lifecycle timeout: %w", requestTimeout, err)
+		}
 		return nil, err
 	}
 	if response == nil {
