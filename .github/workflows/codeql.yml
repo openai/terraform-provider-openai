@@ -60,6 +60,12 @@ jobs:
       # tools/tools.go remains intentionally excluded by its `generate` build tag.
       - name: Compile Go packages for CodeQL
         if: matrix.language == 'go'
+        env:
+          # Manual Go builds require tracing to be explicitly enabled so the
+          # extractor observes compiler invocations made by `go test`.
+          CODEQL_EXTRACTOR_GO_BUILD_TRACING: "on"
+          # Do not let restored Go build artifacts hide compiler invocations.
+          GOCACHE: ${{ runner.temp }}/codeql-go-build-cache
         run: go test -run '^$' ./...
 
       - name: Perform CodeQL analysis
