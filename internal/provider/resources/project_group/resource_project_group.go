@@ -147,7 +147,15 @@ func (r *ProjectGroupResource) Create(ctx context.Context, req resource.CreateRe
 	body := map[string]any{}
 	openaiapi.AddStringBodyField(body, "group_id", data.GroupID)
 	openaiapi.AddStringBodyField(body, "role", data.Role)
+	if err := r.client.InvalidateResponseCache("project_groups", []string{"project_id"}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	responseData, err := r.client.Request(ctx, "POST", "/organization/projects/{project_id}/groups", pathParams, queryParams, body)
+	if err := r.client.InvalidateResponseCache("project_groups", []string{"project_id"}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	if err != nil {
 		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
 		return
@@ -187,10 +195,11 @@ func (r *ProjectGroupResource) Read(ctx context.Context, req resource.ReadReques
 	}
 	pathParams := map[string]string{
 		"project_id": data.ProjectID.ValueString(),
-		"group_id":   data.GroupID.ValueString(),
 	}
-	queryParams := map[string]string{}
-	responseData, err := r.client.Request(ctx, "GET", "/organization/projects/{project_id}/groups/{group_id}", pathParams, queryParams, nil)
+	queryParams := map[string]string{
+		"limit": "100",
+	}
+	responseData, err := r.client.CachedPaginatedRequest(ctx, "project_groups", []string{"project_id"}, "GET", "/organization/projects/{project_id}/groups", pathParams, queryParams)
 	if err != nil {
 		if openaiapi.IsNotFound(err) {
 			resp.State.RemoveResource(ctx)
@@ -199,6 +208,16 @@ func (r *ProjectGroupResource) Read(ctx context.Context, req resource.ReadReques
 		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
 		return
 	}
+	selectedResponseData, found, err := openaiapi.ResponseObjectByField(responseData, "data", "group_id", data.GroupID.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
+		return
+	}
+	if !found {
+		resp.State.RemoveResource(ctx)
+		return
+	}
+	responseData = selectedResponseData
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"project_id"}, &data.ProjectID, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
@@ -251,7 +270,15 @@ func (r *ProjectGroupResource) Delete(ctx context.Context, req resource.DeleteRe
 		"group_id":   data.GroupID.ValueString(),
 	}
 	queryParams := map[string]string{}
+	if err := r.client.InvalidateResponseCache("project_groups", []string{"project_id"}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	responseData, err := r.client.Request(ctx, "DELETE", "/organization/projects/{project_id}/groups/{group_id}", pathParams, queryParams, nil)
+	if err := r.client.InvalidateResponseCache("project_groups", []string{"project_id"}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	if err != nil {
 		if openaiapi.IsNotFound(err) {
 			resp.State.RemoveResource(ctx)

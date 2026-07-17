@@ -151,7 +151,15 @@ func (r *ProjectResource) Create(ctx context.Context, req resource.CreateRequest
 	openaiapi.AddStringBodyField(body, "name", data.Name)
 	openaiapi.AddStringBodyField(body, "geography", data.Geography)
 	openaiapi.AddStringBodyField(body, "external_key_id", data.ExternalKeyID)
+	if err := r.client.InvalidateResponseCache("organization_projects", []string{}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	responseData, err := r.client.Request(ctx, "POST", "/organization/projects", pathParams, queryParams, body)
+	if err := r.client.InvalidateResponseCache("organization_projects", []string{}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	if err != nil {
 		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
 		return
@@ -165,10 +173,6 @@ func (r *ProjectResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"name"}, &data.Name, false); err != nil {
-		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-		return
-	}
-	if err := openaiapi.ApplyStringResponseField(responseData, []string{"external_key_id"}, &data.ExternalKeyID, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
 	}
@@ -197,11 +201,12 @@ func (r *ProjectResource) Read(ctx context.Context, req resource.ReadRequest, re
 		resp.Diagnostics.AddError("Missing OpenAI API client", "The provider was not configured before this operation ran.")
 		return
 	}
-	pathParams := map[string]string{
-		"project_id": data.ProjectID.ValueString(),
+	pathParams := map[string]string{}
+	queryParams := map[string]string{
+		"include_archived": "true",
+		"limit":            "100",
 	}
-	queryParams := map[string]string{}
-	responseData, err := r.client.Request(ctx, "GET", "/organization/projects/{project_id}", pathParams, queryParams, nil)
+	responseData, err := r.client.CachedPaginatedRequest(ctx, "organization_projects", []string{}, "GET", "/organization/projects", pathParams, queryParams)
 	if err != nil {
 		if openaiapi.IsNotFound(err) {
 			resp.State.RemoveResource(ctx)
@@ -210,6 +215,16 @@ func (r *ProjectResource) Read(ctx context.Context, req resource.ReadRequest, re
 		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
 		return
 	}
+	selectedResponseData, found, err := openaiapi.ResponseObjectByField(responseData, "data", "id", data.ProjectID.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
+		return
+	}
+	if !found {
+		resp.State.RemoveResource(ctx)
+		return
+	}
+	responseData = selectedResponseData
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"id"}, &data.ProjectID, true); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
@@ -219,10 +234,6 @@ func (r *ProjectResource) Read(ctx context.Context, req resource.ReadRequest, re
 		return
 	}
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"name"}, &data.Name, false); err != nil {
-		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-		return
-	}
-	if err := openaiapi.ApplyStringResponseField(responseData, []string{"external_key_id"}, &data.ExternalKeyID, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
 	}
@@ -264,7 +275,15 @@ func (r *ProjectResource) Update(ctx context.Context, req resource.UpdateRequest
 	openaiapi.AddStringBodyField(body, "name", data.Name)
 	openaiapi.AddNullableStringBodyFieldForUpdate(body, "geography", data.Geography, stateData.Geography)
 	openaiapi.AddNullableStringBodyFieldForUpdate(body, "external_key_id", data.ExternalKeyID, stateData.ExternalKeyID)
+	if err := r.client.InvalidateResponseCache("organization_projects", []string{}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	responseData, err := r.client.Request(ctx, "POST", "/organization/projects/{project_id}", pathParams, queryParams, body)
+	if err := r.client.InvalidateResponseCache("organization_projects", []string{}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	if err != nil {
 		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
 		return
@@ -278,10 +297,6 @@ func (r *ProjectResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"name"}, &data.Name, false); err != nil {
-		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-		return
-	}
-	if err := openaiapi.ApplyStringResponseField(responseData, []string{"external_key_id"}, &data.ExternalKeyID, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
 	}
@@ -314,7 +329,15 @@ func (r *ProjectResource) Delete(ctx context.Context, req resource.DeleteRequest
 		"project_id": data.ProjectID.ValueString(),
 	}
 	queryParams := map[string]string{}
+	if err := r.client.InvalidateResponseCache("organization_projects", []string{}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	responseData, err := r.client.Request(ctx, "POST", "/organization/projects/{project_id}/archive", pathParams, queryParams, nil)
+	if err := r.client.InvalidateResponseCache("organization_projects", []string{}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	if err != nil {
 		if openaiapi.IsNotFound(err) {
 			resp.State.RemoveResource(ctx)

@@ -14,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	openai "github.com/openai/openai-go/v3"
@@ -134,6 +135,269 @@ func TestRequestRejectsPathDotSegments(t *testing.T) {
 	}
 	if calls != 0 {
 		t.Fatalf("expected invalid paths to be rejected before dispatch, got %d requests", calls)
+	}
+}
+
+func TestRequestBoundsRetryLifecycleAndRedactsTelemetry(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "10")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{"message": "retry later", "type": "rate_limit_error"},
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	maxRetries := 2
+	var observationsMu sync.Mutex
+	var observations []requestObservation
+	client := &APIClient{
+		ProviderVersion:      "test",
+		Client:               openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+		requestTimeout:       75 * time.Millisecond,
+		slowRequestThreshold: 10 * time.Millisecond,
+		requestMaxRetries:    &maxRetries,
+		requestObserver: func(observation requestObservation) {
+			observationsMu.Lock()
+			defer observationsMu.Unlock()
+			observations = append(observations, observation)
+		},
+	}
+
+	startedAt := time.Now()
+	_, err := client.Request(
+		context.Background(),
+		http.MethodGet,
+		"/organization/projects/{project_id}/rate_limits",
+		map[string]string{"project_id": "secret-project-id"},
+		map[string]string{"after": "secret-cursor"},
+		nil,
+	)
+	duration := time.Since(startedAt)
+	if err == nil || !strings.Contains(err.Error(), "retry-lifecycle timeout") {
+		t.Fatalf("expected bounded retry-lifecycle timeout, got %v", err)
+	}
+	if duration > time.Second {
+		t.Fatalf("request exceeded its bounded lifecycle: %s", duration)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("expected timeout during retry backoff before another attempt, got %d calls", calls.Load())
+	}
+
+	observationsMu.Lock()
+	defer observationsMu.Unlock()
+	var sawPending bool
+	var sawTimedOutLifecycle bool
+	for _, observation := range observations {
+		if strings.Contains(observation.Path, "secret-project-id") || strings.Contains(observation.Path, "secret-cursor") {
+			t.Fatalf("telemetry contained a concrete path or query value: %#v", observation)
+		}
+		if observation.Path != "/organization/projects/{project_id}/rate_limits" {
+			t.Fatalf("telemetry did not retain the safe path template: %#v", observation)
+		}
+		sawPending = sawPending || observation.Phase == requestObservationPending
+		sawTimedOutLifecycle = sawTimedOutLifecycle || observation.Phase == requestObservationLifecycle && observation.TimedOut
+	}
+	if !sawPending {
+		t.Fatalf("expected pending retry-lifecycle telemetry, got %#v", observations)
+	}
+	if !sawTimedOutLifecycle {
+		t.Fatalf("expected timed-out retry-lifecycle telemetry, got %#v", observations)
+	}
+	for _, observation := range observations {
+		switch observation.Phase {
+		case requestObservationPending:
+			if observation.Outcome != requestOutcomePending {
+				t.Fatalf("pending observation has outcome %q: %#v", observation.Outcome, observation)
+			}
+		case requestObservationLifecycle:
+			if observation.Outcome != requestOutcomeDeadline {
+				t.Fatalf("timed-out lifecycle has outcome %q: %#v", observation.Outcome, observation)
+			}
+			if message, failed := client.requestObservationErrorMessage(observation); !failed {
+				t.Fatalf("timed-out lifecycle was not classified as an error: %q %#v", message, observation)
+			}
+		}
+	}
+}
+
+func TestRequestRecordsRetryAttempts(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		call := calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if call == 1 {
+			w.Header().Set("Retry-After-Ms", "1")
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"error": map[string]any{"message": "retry", "type": "server_error"},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "group-1"})
+	}))
+	t.Cleanup(server.Close)
+
+	maxRetries := 2
+	var observationsMu sync.Mutex
+	var observations []requestObservation
+	client := &APIClient{
+		ProviderVersion: "test",
+		Client: openai.NewClient(
+			option.WithAPIKey("test"),
+			option.WithBaseURL(server.URL),
+			option.WithHeader("X-Stainless-Retry-Count", "42"),
+		),
+		requestTimeout:       time.Second,
+		slowRequestThreshold: time.Second,
+		requestMaxRetries:    &maxRetries,
+		requestObserver: func(observation requestObservation) {
+			observationsMu.Lock()
+			defer observationsMu.Unlock()
+			observations = append(observations, observation)
+		},
+	}
+
+	if _, err := client.Request(context.Background(), http.MethodGet, "/organization/groups/{group_id}", map[string]string{"group_id": "group-1"}, nil, nil); err != nil {
+		t.Fatalf("Request returned error: %v", err)
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("expected one retry before success, got %d calls", calls.Load())
+	}
+
+	observationsMu.Lock()
+	defer observationsMu.Unlock()
+	var sawInitialFailure bool
+	var sawRetrySuccess bool
+	var completedLifecycle requestObservation
+	for _, observation := range observations {
+		switch observation.Phase {
+		case requestObservationAttempt:
+			sawInitialFailure = sawInitialFailure || observation.RetryCount == 0 && observation.StatusCode == http.StatusInternalServerError && observation.Outcome == requestOutcomeAPIError
+			sawRetrySuccess = sawRetrySuccess || observation.RetryCount == 1 && observation.StatusCode == http.StatusOK && observation.Outcome == requestOutcomeSuccess
+			if message, warn := client.requestObservationWarningMessage(observation); warn {
+				t.Fatalf("routine retry attempt was classified as warning %q: %#v", message, observation)
+			}
+		case requestObservationLifecycle:
+			completedLifecycle = observation
+		}
+	}
+	if !sawInitialFailure || !sawRetrySuccess {
+		t.Fatalf("expected telemetry for the failed attempt and successful retry, got %#v", observations)
+	}
+	if completedLifecycle.RetryCount != 1 || completedLifecycle.StatusCode != http.StatusOK || completedLifecycle.Outcome != requestOutcomeSuccess {
+		t.Fatalf("expected successful lifecycle to summarize one retry, got %#v", completedLifecycle)
+	}
+	if message, failed := client.requestObservationErrorMessage(completedLifecycle); failed {
+		t.Fatalf("successful retry lifecycle was classified as error %q: %#v", message, completedLifecycle)
+	}
+	if message, warn := client.requestObservationWarningMessage(completedLifecycle); warn {
+		t.Fatalf("successful retry lifecycle was classified as warning %q: %#v", message, completedLifecycle)
+	}
+	completedLifecycle.StatusCode = http.StatusInternalServerError
+	completedLifecycle.Outcome = requestOutcomeAPIError
+	if _, failed := client.requestObservationErrorMessage(completedLifecycle); !failed {
+		t.Fatalf("terminal server error lifecycle was not classified as an error: %#v", completedLifecycle)
+	}
+}
+
+func TestRequestWaitsForPendingObservationBeforeLifecycleCompletion(t *testing.T) {
+	pendingStarted := make(chan struct{})
+	releasePending := make(chan struct{})
+	attemptCompleted := make(chan struct{})
+	lifecycleCompleted := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-pendingStarted
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "group-1"})
+	}))
+	t.Cleanup(server.Close)
+
+	pendingReleased := false
+	defer func() {
+		if !pendingReleased {
+			close(releasePending)
+		}
+	}()
+
+	maxRetries := 0
+	client := &APIClient{
+		ProviderVersion:      "test",
+		Client:               openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+		requestTimeout:       time.Second,
+		slowRequestThreshold: time.Millisecond,
+		requestMaxRetries:    &maxRetries,
+		requestObserver: func(observation requestObservation) {
+			switch observation.Phase {
+			case requestObservationPending:
+				close(pendingStarted)
+				<-releasePending
+			case requestObservationAttempt:
+				close(attemptCompleted)
+			case requestObservationLifecycle:
+				close(lifecycleCompleted)
+			}
+		},
+	}
+
+	requestCompleted := make(chan error, 1)
+	go func() {
+		_, err := client.Request(context.Background(), http.MethodGet, "/organization/groups/{group_id}", map[string]string{"group_id": "group-1"}, nil, nil)
+		requestCompleted <- err
+	}()
+
+	select {
+	case <-attemptCompleted:
+	case <-time.After(time.Second):
+		t.Fatal("HTTP attempt did not complete while the pending observation was blocked")
+	}
+	select {
+	case <-lifecycleCompleted:
+		t.Fatal("lifecycle completion overtook the pending observation")
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	close(releasePending)
+	pendingReleased = true
+	select {
+	case err := <-requestCompleted:
+		if err != nil {
+			t.Fatalf("Request returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("request did not complete after the pending observation was released")
+	}
+	select {
+	case <-lifecycleCompleted:
+	case <-time.After(time.Second):
+		t.Fatal("lifecycle completion was not observed")
+	}
+}
+
+func TestClassifyRequestOutcome(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		contextErr error
+		statusCode int
+		want       string
+	}{
+		{name: "success", statusCode: http.StatusOK, want: requestOutcomeSuccess},
+		{name: "API error", statusCode: http.StatusInternalServerError, want: requestOutcomeAPIError},
+		{name: "request error", err: errors.New("transport failed"), want: requestOutcomeRequestError},
+		{name: "canceled", err: fmt.Errorf("wrapped: %w", context.Canceled), contextErr: context.Canceled, want: requestOutcomeCanceled},
+		{name: "deadline exceeded", err: fmt.Errorf("wrapped: %w", context.DeadlineExceeded), contextErr: context.DeadlineExceeded, want: requestOutcomeDeadline},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := classifyRequestOutcome(test.err, test.contextErr, test.statusCode); got != test.want {
+				t.Fatalf("classifyRequestOutcome() = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 
@@ -283,6 +547,59 @@ func TestCachedPaginatedRequestCoalescesConcurrentCalls(t *testing.T) {
 	}
 	if calls.Load() != 2 {
 		t.Fatalf("expected one two-page traversal, got %d requests", calls.Load())
+	}
+}
+
+func TestCachedPaginatedRequestSupportsSingletonCache(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data":     []map[string]any{{"id": "proj-1"}},
+			"has_more": false,
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	client := &APIClient{
+		ProviderVersion: "test",
+		Client:          openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+	}
+	load := func() (map[string]any, error) {
+		return client.CachedPaginatedRequest(
+			context.Background(),
+			"organization_projects",
+			nil,
+			http.MethodGet,
+			"/organization/projects",
+			map[string]string{},
+			map[string]string{"limit": "100"},
+		)
+	}
+
+	for range 2 {
+		response, err := load()
+		if err != nil {
+			t.Fatalf("CachedPaginatedRequest returned error: %v", err)
+		}
+		items, err := ResponseObjectList(response, "data", true)
+		if err != nil || len(items) != 1 || items[0]["id"] != "proj-1" {
+			t.Fatalf("unexpected cached response: %#v, err=%v", response, err)
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("expected one singleton cache load, got %d requests", calls.Load())
+	}
+
+	if err := client.InvalidateResponseCache("organization_projects", nil, map[string]string{}); err != nil {
+		t.Fatalf("InvalidateResponseCache returned error: %v", err)
+	}
+	if _, err := load(); err != nil {
+		t.Fatalf("CachedPaginatedRequest after invalidation returned error: %v", err)
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("expected singleton cache invalidation to reload, got %d requests", calls.Load())
 	}
 }
 
@@ -442,7 +759,7 @@ func TestResponseCacheRetriesReaderOfEvictedEntry(t *testing.T) {
 	if loaded {
 		t.Fatal("expected project A to start as a cache miss")
 	}
-	cache.finishLoad(entryA, map[string]any{"project_id": "proj-a"}, nil)
+	cache.finishLoad(entryA, map[string]any{"project_id": "proj-a"}, nil, false)
 	acquiredA, loaded := cache.acquire(keyA)
 	if !loaded || acquiredA != entryA {
 		t.Fatal("expected project A to be acquired from the cache")
@@ -452,7 +769,7 @@ func TestResponseCacheRetriesReaderOfEvictedEntry(t *testing.T) {
 	if loaded {
 		t.Fatal("expected project B to start as a cache miss")
 	}
-	cache.finishLoad(entryB, map[string]any{"project_id": "proj-b"}, nil)
+	cache.finishLoad(entryB, map[string]any{"project_id": "proj-b"}, nil, false)
 	cache.invalidate(keyA)
 
 	if _, _, retry := cache.result(context.Background(), acquiredA, true); !retry {
@@ -543,6 +860,86 @@ func TestResponseCacheRetriesWhenLoaderContextIsCanceled(t *testing.T) {
 	}
 	if loads.Load() != 1 {
 		t.Fatalf("expected one retry by the live waiter, got %d", loads.Load())
+	}
+}
+
+func TestResponseCacheRetainsSuccessfulLoadWhenLoaderContextEnds(t *testing.T) {
+	cache := &responseCache{}
+	key := responseCacheKey{name: "project_rate_limits", values: "proj-1"}
+	loaderContext, cancelLoader := context.WithCancel(context.Background())
+	t.Cleanup(cancelLoader)
+
+	response, err := cache.get(loaderContext, key, func(context.Context) (map[string]any, error) {
+		cancelLoader()
+		return map[string]any{"data": []any{map[string]any{"id": "rl-success"}}}, nil
+	})
+	if err != nil {
+		t.Fatalf("successful load returned error: %v", err)
+	}
+	items, err := ResponseObjectList(response, "data", true)
+	if err != nil || len(items) != 1 || items[0]["id"] != "rl-success" {
+		t.Fatalf("successful load returned unexpected response: %#v, err=%v", response, err)
+	}
+
+	entry, loaded := cache.acquire(key)
+	if !loaded {
+		t.Fatal("expected successful load to remain cached")
+	}
+	cached, cachedErr, retry := cache.result(context.Background(), entry, true)
+	if retry {
+		t.Fatal("successful load was misclassified as loader cancellation")
+	}
+	if cachedErr != nil {
+		t.Fatalf("cached successful load returned error: %v", cachedErr)
+	}
+	items, err = ResponseObjectList(cached, "data", true)
+	if err != nil || len(items) != 1 || items[0]["id"] != "rl-success" {
+		t.Fatalf("cached successful load returned unexpected response: %#v, err=%v", cached, err)
+	}
+}
+
+func TestResponseCacheSharesLoaderLocalDeadline(t *testing.T) {
+	cache := &responseCache{}
+	key := responseCacheKey{name: "project_rate_limits", values: "proj-1"}
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var loads atomic.Int64
+	var firstStartedOnce sync.Once
+	load := func(context.Context) (map[string]any, error) {
+		loads.Add(1)
+		firstStartedOnce.Do(func() { close(firstStarted) })
+		<-releaseFirst
+		return nil, context.DeadlineExceeded
+	}
+
+	firstError := make(chan error, 1)
+	go func() {
+		_, err := cache.get(context.Background(), key, load)
+		firstError <- err
+	}()
+	<-firstStarted
+
+	waiterObserved := make(chan struct{})
+	waiterContext := &observedDoneContext{
+		Context:  context.Background(),
+		observed: waiterObserved,
+	}
+	waiterError := make(chan error, 1)
+	go func() {
+		_, err := cache.get(waiterContext, key, load)
+		waiterError <- err
+	}()
+	<-waiterObserved
+
+	close(releaseFirst)
+	if err := <-firstError; !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected first loader deadline, got %v", err)
+	}
+	if err := <-waiterError; !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected waiter to share loader-local deadline, got %v", err)
+	}
+	if loads.Load() != 1 {
+		t.Fatalf("expected one shared loader-local deadline, got %d loads", loads.Load())
 	}
 }
 
