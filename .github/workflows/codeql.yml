@@ -24,11 +24,11 @@ jobs:
     name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
 
-    # These settings are ignored by the Actions extractor. Go build tracing
-    # must be selected before CodeQL initializes its database, and test files
-    # are excluded unless the extractor is explicitly told to include them.
+    # These settings are ignored by the Actions extractor. Supplying an
+    # explicit dependency command keeps Go's autobuilder from invoking the
+    # repository's broad `make` target, and test files are otherwise excluded.
     env:
-      CODEQL_EXTRACTOR_GO_BUILD_TRACING: "on"
+      CODEQL_EXTRACTOR_GO_BUILD_COMMAND: "go mod download"
       CODEQL_EXTRACTOR_GO_OPTION_EXTRACT_TESTS: "true"
 
     strategy:
@@ -38,7 +38,7 @@ jobs:
           - language: actions
             build-mode: none
           - language: go
-            build-mode: manual
+            build-mode: autobuild
 
     steps:
       - name: Checkout repository
@@ -59,18 +59,6 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
-
-      # Default Go autobuild invokes the repository's broad `make` target,
-      # which requires golangci-lint and then falls back to extracting only
-      # non-test packages. Compile every test package without running tests so
-      # CodeQL can analyze the test sources as well as the production sources.
-      # tools/tools.go remains intentionally excluded by its `generate` build tag.
-      - name: Compile Go packages for CodeQL
-        if: matrix.language == 'go'
-        env:
-          # Do not let restored Go build artifacts hide compiler invocations.
-          GOCACHE: ${{ runner.temp }}/codeql-go-build-cache
-        run: go test -run '^$' ./...
 
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
