@@ -50,6 +50,46 @@ resource "openai_project_user" "test" {
 	)
 }
 
+func testAccProjectUserUserIdOnlyConfig3(t *testing.T) string {
+	t.Helper()
+	return fmt.Sprintf(
+		`provider "openai" {}
+
+resource "openai_project" "test" {
+  name = %q
+}
+
+resource "openai_project_user" "test" {
+  project_id = openai_project.test.project_id
+  user_id = %q
+  role = "member"
+}
+`,
+		acctest.TemplateValue(t, "tf-acc-openai-project-user-replacement-{suffix}"),
+		acctest.FixtureValue(t, "user_id"),
+	)
+}
+
+func testAccProjectUserUserIdOnlyConfig4(t *testing.T) string {
+	t.Helper()
+	return fmt.Sprintf(
+		`provider "openai" {}
+
+resource "openai_project" "test" {
+  name = %q
+}
+
+resource "openai_project_user" "test" {
+  project_id = openai_project.test.project_id
+  user_id = %q
+  role = "member"
+}
+`,
+		acctest.TemplateValue(t, "tf-acc-openai-project-user-{suffix}"),
+		acctest.FixtureValue(t, "user_id"),
+	)
+}
+
 func testAccProjectUserEmailOnlyConfig1(t *testing.T) string {
 	t.Helper()
 	return fmt.Sprintf(
@@ -86,6 +126,20 @@ func TestAccProjectUser_UserIdOnly(t *testing.T) {
 			},
 			{
 				Config: testAccProjectUserUserIdOnlyConfig2(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("openai_project_user.test", "user_id", acctest.FixtureValue(t, "user_id")),
+					resource.TestCheckResourceAttr("openai_project_user.test", "role", "member"),
+				),
+			},
+			{
+				Config: testAccProjectUserUserIdOnlyConfig3(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("openai_project_user.test", "user_id", acctest.FixtureValue(t, "user_id")),
+					resource.TestCheckResourceAttr("openai_project_user.test", "role", "member"),
+				),
+			},
+			{
+				Config: testAccProjectUserUserIdOnlyConfig4(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("openai_project_user.test", "user_id", acctest.FixtureValue(t, "user_id")),
 					resource.TestCheckResourceAttr("openai_project_user.test", "role", "member"),

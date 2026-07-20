@@ -139,6 +139,11 @@ func (r *ProjectUserResource) Create(ctx context.Context, req resource.CreateReq
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	var configData ProjectUserResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &configData)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	if r.client == nil {
 		resp.Diagnostics.AddError("Missing OpenAI API client", "The provider was not configured before this operation ran.")
 		return
@@ -148,8 +153,8 @@ func (r *ProjectUserResource) Create(ctx context.Context, req resource.CreateReq
 	}
 	queryParams := map[string]string{}
 	body := map[string]any{}
-	openaiapi.AddStringBodyField(body, "user_id", data.UserID)
-	openaiapi.AddStringBodyField(body, "email", data.Email)
+	openaiapi.AddStringBodyField(body, "user_id", configData.UserID)
+	openaiapi.AddStringBodyField(body, "email", configData.Email)
 	openaiapi.AddStringBodyField(body, "role", data.Role)
 	responseData, err := r.client.Request(ctx, "POST", "/organization/projects/{project_id}/users", pathParams, queryParams, body)
 	if err != nil {
