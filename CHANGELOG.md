@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.1](https://github.com/openai/terraform-provider-openai/compare/v0.6.0...v0.6.1) (2026-07-20)
+
+
+### Bug Fixes
+
+* address provider review regressions ([#40](https://github.com/openai/terraform-provider-openai/issues/40)) ([dd96f47](https://github.com/openai/terraform-provider-openai/commit/dd96f4754506dd229e37be291345e800d6741537))
+* retry timed-out provider reads ([#43](https://github.com/openai/terraform-provider-openai/issues/43)) ([472c15c](https://github.com/openai/terraform-provider-openai/commit/472c15ce7e088ce68d52531a04f9f927e5fed934))
+
+
+### Performance Improvements
+
+* optimize provider plan requests ([#38](https://github.com/openai/terraform-provider-openai/issues/38)) ([b969b4b](https://github.com/openai/terraform-provider-openai/commit/b969b4bf52ba024c46540ec0d4c5533df1355a83))
+
 ## [0.6.0](https://github.com/openai/terraform-provider-openai/compare/v0.5.0...v0.6.0) (2026-07-16)
 
 
