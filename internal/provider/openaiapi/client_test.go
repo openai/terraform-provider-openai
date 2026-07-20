@@ -478,6 +478,80 @@ func TestPaginatedRequestRejectsRepeatedCursor(t *testing.T) {
 	}
 }
 
+func TestPaginatedRequestRejectsMalformedPageFields(t *testing.T) {
+	tests := []struct {
+		name     string
+		response map[string]any
+		want     string
+	}{
+		{
+			name:     "missing data",
+			response: map[string]any{"has_more": false},
+			want:     "pagination response field \"data\" is missing",
+		},
+		{
+			name:     "wrong type data",
+			response: map[string]any{"data": "not-a-list", "has_more": false},
+			want:     "pagination response field \"data\" is not a list",
+		},
+		{
+			name:     "wrong type has_more",
+			response: map[string]any{"data": []any{}, "has_more": "yes"},
+			want:     "pagination response field \"has_more\" is not a bool",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(test.response)
+			}))
+			t.Cleanup(server.Close)
+
+			client := &APIClient{
+				ProviderVersion: "test",
+				Client:          openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+			}
+			_, err := client.PaginatedRequest(
+				context.Background(),
+				http.MethodGet,
+				"/organization/roles",
+				map[string]string{},
+				map[string]string{"limit": "1"},
+			)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("expected %q error, got %v", test.want, err)
+			}
+		})
+	}
+}
+
+func TestPaginatedRequestRejectsMissingCursorWhenMorePagesRemain(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data":     []any{},
+			"has_more": true,
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	client := &APIClient{
+		ProviderVersion: "test",
+		Client:          openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+	}
+	_, err := client.PaginatedRequest(
+		context.Background(),
+		http.MethodGet,
+		"/organization/roles",
+		map[string]string{},
+		map[string]string{"limit": "1"},
+	)
+	if err == nil || !strings.Contains(err.Error(), "has_more=true without usable cursor") {
+		t.Fatalf("expected missing cursor error, got %v", err)
+	}
+}
+
 func TestCachedPaginatedRequestCoalescesConcurrentCalls(t *testing.T) {
 	var calls atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1125,6 +1199,17 @@ func TestApplyStringResponseFieldRejectsMalformedValue(t *testing.T) {
 	err := ApplyStringResponseField(map[string]any{"id": []any{"not-a-string"}}, []string{"id"}, &value, true)
 	if err == nil || !strings.Contains(err.Error(), "not a string-compatible value") {
 		t.Fatalf("expected malformed string response field error, got %v", err)
+	}
+}
+
+func TestApplyStringResponseFieldMissingOptionalPreservesKnownValue(t *testing.T) {
+	value := types.StringValue("extkey_existing")
+	err := ApplyStringResponseField(map[string]any{}, []string{"external_key_id"}, &value, false)
+	if err != nil {
+		t.Fatalf("ApplyStringResponseField returned error: %v", err)
+	}
+	if value.ValueString() != "extkey_existing" {
+		t.Fatalf("expected missing optional response field to preserve known value, got %#v", value)
 	}
 }
 

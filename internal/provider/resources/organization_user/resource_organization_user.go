@@ -52,7 +52,7 @@ func (r *OrganizationUserResource) Metadata(ctx context.Context, req resource.Me
 
 func (r *OrganizationUserResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manage an existing organization user.",
+		MarkdownDescription: "Manage an existing organization user. This resource is import-only; configuration alone cannot create a user. Import an existing organization user before Terraform can manage update or delete behavior.",
 		Attributes: map[string]schema.Attribute{
 			"user_id": schema.StringAttribute{
 				MarkdownDescription: "user id",

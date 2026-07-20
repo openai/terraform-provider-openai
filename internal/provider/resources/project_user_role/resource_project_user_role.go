@@ -173,23 +173,23 @@ func (r *ProjectUserRoleResource) Create(ctx context.Context, req resource.Creat
 		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
 		return
 	}
-	if err := openaiapi.ApplyStringResponseField(responseData, []string{"name"}, &data.Name, false); err != nil {
+	if err := openaiapi.ApplyStringResponseField(responseData, []string{"role.name"}, &data.Name, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
 	}
-	if err := openaiapi.ApplyStringResponseField(responseData, []string{"description"}, &data.Description, false); err != nil {
+	if err := openaiapi.ApplyStringResponseField(responseData, []string{"role.description"}, &data.Description, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
 	}
-	if err := openaiapi.ApplyStringListResponseField(responseData, []string{"permissions"}, &data.Permissions, false); err != nil {
+	if err := openaiapi.ApplyStringListResponseField(responseData, []string{"role.permissions"}, &data.Permissions, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
 	}
-	if err := openaiapi.ApplyStringResponseField(responseData, []string{"resource_type"}, &data.ResourceType, false); err != nil {
+	if err := openaiapi.ApplyStringResponseField(responseData, []string{"role.resource_type"}, &data.ResourceType, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
 	}
-	if err := openaiapi.ApplyBoolResponseField(responseData, []string{"predefined_role"}, &data.PredefinedRole, false); err != nil {
+	if err := openaiapi.ApplyBoolResponseField(responseData, []string{"role.predefined_role"}, &data.PredefinedRole, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
 	}

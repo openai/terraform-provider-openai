@@ -24,7 +24,6 @@ type ProjectGroupDataSource struct {
 type ProjectGroupDataSourceModel struct {
 	ProjectID    types.String `tfsdk:"project_id"`
 	GroupID      types.String `tfsdk:"group_id"`
-	Role         types.String `tfsdk:"role"`
 	GroupName    types.String `tfsdk:"group_name"`
 	GroupType    types.String `tfsdk:"group_type"`
 	CreatedAt    types.Int64  `tfsdk:"created_at"`
@@ -42,7 +41,7 @@ func (d *ProjectGroupDataSource) Metadata(ctx context.Context, req datasource.Me
 
 func (d *ProjectGroupDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Look up a group assignment to a project.",
+		MarkdownDescription: "Look up a group assignment to a project. Role assignments are not represented by this data source; use openai_project_group_roles to list them.",
 		Attributes: map[string]schema.Attribute{
 			"project_id": schema.StringAttribute{
 				MarkdownDescription: "project id",
@@ -65,13 +64,6 @@ func (d *ProjectGroupDataSource) Schema(ctx context.Context, req datasource.Sche
 					openaiapi.StringIsValidPathParameter(),
 					openaiapi.StringLengthAtLeast(1),
 				},
-			},
-			"role": schema.StringAttribute{
-				MarkdownDescription: "role",
-				Required:            false,
-				Optional:            false,
-				Computed:            true,
-				Sensitive:           false,
 			},
 			"group_name": schema.StringAttribute{
 				MarkdownDescription: "group name",
@@ -145,10 +137,6 @@ func (d *ProjectGroupDataSource) Read(ctx context.Context, req datasource.ReadRe
 		return
 	}
 	data.ID = types.StringValue(fmt.Sprintf("openai_project_group/%s/%s", data.ProjectID.ValueString(), data.GroupID.ValueString()))
-	if err := openaiapi.ApplyStringResponseField(responseData, []string{"role"}, &data.Role, false); err != nil {
-		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-		return
-	}
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"group_name"}, &data.GroupName, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return

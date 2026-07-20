@@ -3,17 +3,22 @@
 page_title: "openai_organization_user Resource - openai"
 subcategory: ""
 description: |-
-  Manage an existing organization user.
+  Manage an existing organization user. This resource is import-only; configuration alone cannot create a user. Import an existing organization user before Terraform can manage update or delete behavior.
 ---
 
 # openai_organization_user (Resource)
 
-Manage an existing organization user.
+Manage an existing organization user. This resource is import-only; configuration alone cannot create a user. Import an existing organization user before Terraform can manage update or delete behavior.
 
 ## Example Usage
 
 ```terraform
 resource "openai_organization_user" "example" {
+}
+
+import {
+  to = openai_organization_user.example
+  id = "user_123"
 }
 ```
 
@@ -39,16 +44,3 @@ resource "openai_organization_user" "example" {
 - `is_service_account` (Boolean) is service account
 - `name` (String) name
 - `user_id` (String) user id
-
-## Import
-
-Import is supported using the following syntax:
-
-In Terraform v1.5.0 and later, the [`import` block](https://developer.hashicorp.com/terraform/language/import) can be used with the `id` attribute, for example:
-
-```terraform
-import {
-  to = openai_organization_user.example
-  id = "user_123"
-}
-```
