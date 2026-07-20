@@ -3,12 +3,12 @@
 page_title: "openai_project_service_account Resource - openai"
 subcategory: ""
 description: |-
-  Manage a project service account. The API returns an unredacted API key on create, but the Terraform provider does not model or store that key.
+  Manage a project service account. This resource creates the service account without default project roles and without an API key. To use the service account as a credential, separately assign a project role and create or manage an API key through the appropriate API or provider workflow.
 ---
 
 # openai_project_service_account (Resource)
 
-Manage a project service account. The API returns an unredacted API key on create, but the Terraform provider does not model or store that key.
+Manage a project service account. This resource creates the service account without default project roles and without an API key. To use the service account as a credential, separately assign a project role and create or manage an API key through the appropriate API or provider workflow.
 
 ## Example Usage
 

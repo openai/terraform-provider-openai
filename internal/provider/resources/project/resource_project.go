@@ -176,6 +176,10 @@ func (r *ProjectResource) Create(ctx context.Context, req resource.CreateRequest
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
 	}
+	if err := openaiapi.ApplyStringResponseField(responseData, []string{"external_key_id"}, &data.ExternalKeyID, false); err != nil {
+		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
+		return
+	}
 	if err := openaiapi.ApplyInt64ResponseField(responseData, []string{"created_at"}, &data.CreatedAt, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
@@ -234,6 +238,10 @@ func (r *ProjectResource) Read(ctx context.Context, req resource.ReadRequest, re
 		return
 	}
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"name"}, &data.Name, false); err != nil {
+		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
+		return
+	}
+	if err := openaiapi.ApplyStringResponseField(responseData, []string{"external_key_id"}, &data.ExternalKeyID, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
 	}
@@ -297,6 +305,10 @@ func (r *ProjectResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"name"}, &data.Name, false); err != nil {
+		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
+		return
+	}
+	if err := openaiapi.ApplyStringResponseField(responseData, []string{"external_key_id"}, &data.ExternalKeyID, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
 	}

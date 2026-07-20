@@ -57,6 +57,9 @@ func TestAccProjectUserRole_Basic(t *testing.T) {
 				Config: testAccProjectUserRoleBasicConfig1(t),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("openai_project_user_role.test", "user_id", acctest.FixtureValue(t, "user_id")),
+					resource.TestCheckResourceAttr("openai_project_user_role.test", "name", acctest.TemplateValue(t, "tf-acc-openai-project-user-role-{suffix}")),
+					resource.TestCheckResourceAttr("openai_project_user_role.test", "description", "Managed by Terraform acceptance tests"),
+					resource.TestCheckResourceAttr("openai_project_user_role.test", "permissions.0", acctest.FixtureValue(t, "project_role_permission")),
 				),
 			},
 		},

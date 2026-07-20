@@ -575,11 +575,25 @@ func (c *APIClient) PaginatedRequest(ctx context.Context, method string, path st
 		if merged == nil {
 			merged = response
 		}
-		pageItems, _ := response["data"].([]any)
+		pageItemsValue, ok := response["data"]
+		if !ok {
+			return nil, fmt.Errorf("pagination response field %q is missing for %s", "data", path)
+		}
+		pageItems, ok := pageItemsValue.([]any)
+		if !ok {
+			return nil, fmt.Errorf("pagination response field %q is not a list for %s", "data", path)
+		}
 		items = append(items, pageItems...)
-		hasMore, _ := response["has_more"].(bool)
+		hasMoreValue, ok := response["has_more"]
+		if !ok {
+			return nil, fmt.Errorf("pagination response field %q is missing for %s", "has_more", path)
+		}
+		hasMore, ok := hasMoreValue.(bool)
+		if !ok {
+			return nil, fmt.Errorf("pagination response field %q is not a bool for %s", "has_more", path)
+		}
 		cursor := strings.TrimSpace(nextPageCursor(response, pageItems))
-		if !hasMore || strings.TrimSpace(cursor) == "" {
+		if !hasMore {
 			if merged == nil {
 				merged = map[string]any{}
 			}
@@ -587,6 +601,9 @@ func (c *APIClient) PaginatedRequest(ctx context.Context, method string, path st
 			merged["has_more"] = false
 			merged["next"] = nil
 			return merged, nil
+		}
+		if cursor == "" {
+			return nil, fmt.Errorf("pagination response has_more=true without usable cursor for %s", path)
 		}
 		if _, seen := seenCursors[cursor]; seen {
 			return nil, fmt.Errorf("pagination cursor repeated for %s: %q", path, cursor)

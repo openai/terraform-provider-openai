@@ -66,6 +66,36 @@ resource "openai_project" "test" {
 	)
 }
 
+func testAccProjectExternalKeyIdConfig1(t *testing.T) string {
+	t.Helper()
+	return fmt.Sprintf(
+		`provider "openai" {}
+
+resource "openai_project" "test" {
+  name = %q
+  external_key_id = %q
+}
+`,
+		acctest.TemplateValue(t, "tf-acc-openai-project-ekm-{suffix}"),
+		acctest.FixtureValue(t, "project_external_key_id"),
+	)
+}
+
+func testAccProjectExternalKeyIdConfig2(t *testing.T) string {
+	t.Helper()
+	return fmt.Sprintf(
+		`provider "openai" {}
+
+resource "openai_project" "test" {
+  name = %q
+  external_key_id = %q
+}
+`,
+		acctest.TemplateValue(t, "tf-acc-openai-project-ekm-{suffix}"),
+		acctest.FixtureValue(t, "project_external_key_id"),
+	)
+}
+
 func TestAccProject_Basic(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck: func() {
@@ -114,6 +144,34 @@ func TestAccProject_NullableFields(t *testing.T) {
 					resource.TestCheckResourceAttr("openai_project.test", "name", acctest.TemplateValue(t, "tf-acc-openai-project-nullable-updated-{suffix}")),
 					resource.TestCheckResourceAttr("openai_project.test", "geography", acctest.FixtureValue(t, "project_geography_updated")),
 				),
+			},
+		},
+	})
+}
+
+func TestAccProject_ExternalKeyId(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() {
+			acctest.PreCheck(t, []string{"OPENAI_ADMIN_KEY"})
+		},
+		ProtoV6ProviderFactories: acctest.ProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProjectExternalKeyIdConfig1(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("openai_project.test", "external_key_id", acctest.FixtureValue(t, "project_external_key_id")),
+				),
+			},
+			{
+				Config: testAccProjectExternalKeyIdConfig2(t),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("openai_project.test", "external_key_id", acctest.FixtureValue(t, "project_external_key_id")),
+				),
+			},
+			{
+				ResourceName:      "openai_project.test",
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
