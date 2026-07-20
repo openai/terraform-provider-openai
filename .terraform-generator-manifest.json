@@ -1,7 +1,7 @@
 {
   "files": {
     ".copywrite.hcl": "0a82bb5c46a9350609674864acb590bdcef14031ffa02b3b2d772da015a72f0f",
-    ".github/workflows/ci.yml": "415a1a3f3d3273f94753bb3880cfff2012b93e99f794ea1008899b04e868b091",
+    ".github/workflows/ci.yml": "1d337b042bab202f1785119fa42015c8cadcca02d25194a5226a79944066a57c",
     ".gitignore": "f0883043c2f2146020cbbee6f578dcbf84175c9f7abb9be23780f802a9c26ef6",
     ".golangci.yml": "eedd431166ed43216006dc37f01c9e3f9282d4b339517ab0a68e946c8d3059d6",
     "GNUmakefile": "aed52103deafe3eca3721d1b464ae7212c54a172697224d32c7edd16cf884c7d",
