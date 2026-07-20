@@ -3,11 +3,13 @@
 package openaiapi
 
 import (
+	"bytes"
 	"container/list"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -35,10 +37,11 @@ type APIClient struct {
 
 	// The following fields are test hooks. Provider operation uses the bounded
 	// defaults below.
-	requestTimeout       time.Duration
-	slowRequestThreshold time.Duration
-	requestMaxRetries    *int
-	requestObserver      func(requestObservation)
+	requestTimeout        time.Duration
+	requestAttemptTimeout time.Duration
+	slowRequestThreshold  time.Duration
+	requestMaxRetries     *int
+	requestObserver       func(requestObservation)
 }
 
 const maxPaginatedPages = 1000
@@ -294,18 +297,19 @@ func copyQueryParams(queryParams map[string]string) map[string]string {
 }
 
 const (
-	defaultRequestTimeout       = 2 * time.Minute
-	defaultSlowRequestThreshold = 30 * time.Second
-	defaultRequestMaxRetries    = 2
-	requestObservationPending   = "retry_lifecycle_pending"
-	requestObservationLifecycle = "retry_lifecycle_completed"
-	requestObservationAttempt   = "attempt_completed"
-	requestOutcomePending       = "pending"
-	requestOutcomeSuccess       = "success"
-	requestOutcomeAPIError      = "api_error"
-	requestOutcomeRequestError  = "request_error"
-	requestOutcomeCanceled      = "canceled"
-	requestOutcomeDeadline      = "deadline_exceeded"
+	defaultRequestTimeout        = 5 * time.Minute
+	defaultRequestAttemptTimeout = 30 * time.Second
+	defaultSlowRequestThreshold  = 30 * time.Second
+	defaultRequestMaxRetries     = 2
+	requestObservationPending    = "retry_lifecycle_pending"
+	requestObservationLifecycle  = "retry_lifecycle_completed"
+	requestObservationAttempt    = "attempt_completed"
+	requestOutcomePending        = "pending"
+	requestOutcomeSuccess        = "success"
+	requestOutcomeAPIError       = "api_error"
+	requestOutcomeRequestError   = "request_error"
+	requestOutcomeCanceled       = "canceled"
+	requestOutcomeDeadline       = "deadline_exceeded"
 )
 
 type requestObservation struct {
@@ -348,6 +352,13 @@ func (c *APIClient) effectiveRequestTimeout() time.Duration {
 	return defaultRequestTimeout
 }
 
+func (c *APIClient) effectiveRequestAttemptTimeout() time.Duration {
+	if c.requestAttemptTimeout > 0 {
+		return c.requestAttemptTimeout
+	}
+	return defaultRequestAttemptTimeout
+}
+
 func (c *APIClient) effectiveSlowRequestThreshold() time.Duration {
 	if c.slowRequestThreshold > 0 {
 		return c.slowRequestThreshold
@@ -375,6 +386,19 @@ func classifyRequestOutcome(err error, contextErr error, statusCode int) string 
 	default:
 		return requestOutcomeSuccess
 	}
+}
+
+func responseMetadataControlsRetry(response *http.Response) bool {
+	if response == nil {
+		return false
+	}
+	if retryPolicy := response.Header.Get("x-should-retry"); retryPolicy == "true" || retryPolicy == "false" {
+		return true
+	}
+	return response.StatusCode == http.StatusRequestTimeout ||
+		response.StatusCode == http.StatusConflict ||
+		response.StatusCode == http.StatusTooManyRequests ||
+		response.StatusCode >= http.StatusInternalServerError
 }
 
 func (c *APIClient) requestObservationErrorMessage(observation requestObservation) (string, bool) {
@@ -431,19 +455,46 @@ func (c *APIClient) requestTelemetryMiddleware(ctx context.Context, method strin
 		startedAt := time.Now()
 		retryCount := lifecycle.beginAttempt()
 
-		response, err := next(request)
+		attemptContext := request.Context()
+		cancelAttempt := func() {}
+		attemptRequest := request
+		if method == http.MethodGet {
+			attemptContext, cancelAttempt = context.WithTimeout(attemptContext, c.effectiveRequestAttemptTimeout())
+			attemptRequest = request.Clone(attemptContext)
+		}
+		response, err := next(attemptRequest)
+		statusCode := 0
+		if response != nil {
+			statusCode = response.StatusCode
+		}
+		if method == http.MethodGet && response != nil && response.Body != nil {
+			responseBody, bodyErr := io.ReadAll(response.Body)
+			closeErr := response.Body.Close()
+			if bodyErr == nil {
+				bodyErr = closeErr
+			}
+			if bodyErr != nil {
+				err = bodyErr
+				if !responseMetadataControlsRetry(response) {
+					response = nil
+				}
+			} else {
+				response.Body = io.NopCloser(bytes.NewReader(responseBody))
+				response.ContentLength = int64(len(responseBody))
+			}
+		}
+		attemptContextErr := attemptContext.Err()
+		cancelAttempt()
 		observation := requestObservation{
 			Phase:      requestObservationAttempt,
 			Method:     method,
 			Path:       path,
 			Duration:   time.Since(startedAt),
 			RetryCount: retryCount,
-			TimedOut:   errors.Is(err, context.DeadlineExceeded) || errors.Is(request.Context().Err(), context.DeadlineExceeded),
+			StatusCode: statusCode,
+			TimedOut:   errors.Is(err, context.DeadlineExceeded) || errors.Is(attemptContextErr, context.DeadlineExceeded),
 		}
-		if response != nil {
-			observation.StatusCode = response.StatusCode
-		}
-		observation.Outcome = classifyRequestOutcome(err, request.Context().Err(), observation.StatusCode)
+		observation.Outcome = classifyRequestOutcome(err, attemptContextErr, observation.StatusCode)
 		lifecycle.recordStatusCode(observation.StatusCode)
 		c.recordRequestObservation(ctx, observation)
 		return response, err
@@ -525,11 +576,30 @@ func (c *APIClient) Request(ctx context.Context, method string, path string, pat
 		Duration:   time.Since(requestStartedAt),
 		RetryCount: retryCount,
 		StatusCode: statusCode,
-		TimedOut:   errors.Is(requestContext.Err(), context.DeadlineExceeded),
+		TimedOut:   errors.Is(err, context.DeadlineExceeded) || errors.Is(requestContext.Err(), context.DeadlineExceeded),
 	})
 	if err != nil {
 		if ctx.Err() == nil && errors.Is(requestContext.Err(), context.DeadlineExceeded) {
-			return nil, fmt.Errorf("OpenAI API request exceeded the %s retry-lifecycle timeout: %w", requestTimeout, err)
+			return nil, fmt.Errorf(
+				"OpenAI API %s %s exceeded the %s retry-lifecycle timeout after %d attempt(s) (last_status_code=%d): %w",
+				method,
+				path,
+				requestTimeout,
+				retryCount+1,
+				statusCode,
+				context.DeadlineExceeded,
+			)
+		}
+		if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf(
+				"OpenAI API %s %s exhausted %d attempt(s) after per-attempt timeouts within the %s retry lifecycle (last_status_code=%d): %w",
+				method,
+				path,
+				retryCount+1,
+				requestTimeout,
+				statusCode,
+				context.DeadlineExceeded,
+			)
 		}
 		return nil, err
 	}

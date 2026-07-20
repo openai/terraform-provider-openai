@@ -180,6 +180,14 @@ func TestRequestBoundsRetryLifecycleAndRedactsTelemetry(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "retry-lifecycle timeout") {
 		t.Fatalf("expected bounded retry-lifecycle timeout, got %v", err)
 	}
+	if !strings.Contains(err.Error(), "GET /organization/projects/{project_id}/rate_limits") ||
+		!strings.Contains(err.Error(), "after 1 attempt(s)") ||
+		!strings.Contains(err.Error(), "last_status_code=429") {
+		t.Fatalf("expected safe terminal request metadata, got %v", err)
+	}
+	if strings.Contains(err.Error(), "secret-project-id") || strings.Contains(err.Error(), "secret-cursor") {
+		t.Fatalf("terminal request metadata contained a concrete path or query value: %v", err)
+	}
 	if duration > time.Second {
 		t.Fatalf("request exceeded its bounded lifecycle: %s", duration)
 	}
@@ -221,6 +229,286 @@ func TestRequestBoundsRetryLifecycleAndRedactsTelemetry(t *testing.T) {
 				t.Fatalf("timed-out lifecycle was not classified as an error: %q %#v", message, observation)
 			}
 		}
+	}
+}
+
+func TestRequestRetriesTimedOutGETAttempt(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		call := calls.Add(1)
+		if call == 1 {
+			<-r.Context().Done()
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "group-1"})
+	}))
+	t.Cleanup(server.Close)
+
+	maxRetries := 1
+	var observationsMu sync.Mutex
+	var observations []requestObservation
+	client := &APIClient{
+		ProviderVersion:       "test",
+		Client:                openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+		requestTimeout:        2 * time.Second,
+		requestAttemptTimeout: 10 * time.Millisecond,
+		slowRequestThreshold:  2 * time.Second,
+		requestMaxRetries:     &maxRetries,
+		requestObserver: func(observation requestObservation) {
+			observationsMu.Lock()
+			defer observationsMu.Unlock()
+			observations = append(observations, observation)
+		},
+	}
+
+	if _, err := client.Request(
+		context.Background(),
+		http.MethodGet,
+		"/organization/projects/{project_id}/groups",
+		map[string]string{"project_id": "project-1"},
+		nil,
+		nil,
+	); err != nil {
+		t.Fatalf("Request returned error after retryable attempt timeout: %v", err)
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("expected one timed-out attempt and one successful retry, got %d calls", calls.Load())
+	}
+
+	observationsMu.Lock()
+	defer observationsMu.Unlock()
+	var sawTimedOutAttempt bool
+	var completedLifecycle requestObservation
+	for _, observation := range observations {
+		if observation.Phase == requestObservationAttempt && observation.RetryCount == 0 && observation.TimedOut {
+			sawTimedOutAttempt = true
+		}
+		if observation.Phase == requestObservationLifecycle {
+			completedLifecycle = observation
+		}
+	}
+	if !sawTimedOutAttempt {
+		t.Fatalf("expected timeout telemetry for the first attempt, got %#v", observations)
+	}
+	if completedLifecycle.Outcome != requestOutcomeSuccess || completedLifecycle.RetryCount != 1 {
+		t.Fatalf("expected a successful lifecycle after one retry, got %#v", completedLifecycle)
+	}
+}
+
+func TestRequestRetriesTimedOutGETResponseBody(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		call := calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if call == 1 {
+			w.WriteHeader(http.StatusOK)
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			<-r.Context().Done()
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "group-1"})
+	}))
+	t.Cleanup(server.Close)
+
+	maxRetries := 1
+	client := &APIClient{
+		ProviderVersion:       "test",
+		Client:                openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+		requestTimeout:        2 * time.Second,
+		requestAttemptTimeout: 10 * time.Millisecond,
+		slowRequestThreshold:  2 * time.Second,
+		requestMaxRetries:     &maxRetries,
+	}
+
+	response, err := client.Request(
+		context.Background(),
+		http.MethodGet,
+		"/organization/projects/{project_id}/groups",
+		map[string]string{"project_id": "project-1"},
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("Request returned error after retryable response-body timeout: %v", err)
+	}
+	if response["id"] != "group-1" {
+		t.Fatalf("unexpected response after response-body retry: %#v", response)
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("expected one timed-out response body and one successful retry, got %d calls", calls.Load())
+	}
+}
+
+func TestRequestPreservesRetryAfterWhenGETResponseBodyTimesOut(t *testing.T) {
+	var calls atomic.Int64
+	var callsMu sync.Mutex
+	var callTimes []time.Time
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		call := calls.Add(1)
+		callsMu.Lock()
+		callTimes = append(callTimes, time.Now())
+		callsMu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if call == 1 {
+			w.Header().Set("Retry-After-Ms", "75")
+			w.WriteHeader(http.StatusTooManyRequests)
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			<-r.Context().Done()
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "group-1"})
+	}))
+	t.Cleanup(server.Close)
+
+	maxRetries := 1
+	client := &APIClient{
+		ProviderVersion:       "test",
+		Client:                openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+		requestTimeout:        2 * time.Second,
+		requestAttemptTimeout: 10 * time.Millisecond,
+		slowRequestThreshold:  2 * time.Second,
+		requestMaxRetries:     &maxRetries,
+	}
+
+	response, err := client.Request(
+		context.Background(),
+		http.MethodGet,
+		"/organization/projects/{project_id}/groups",
+		map[string]string{"project_id": "project-1"},
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("Request returned error after retryable response-body timeout: %v", err)
+	}
+	if response["id"] != "group-1" {
+		t.Fatalf("unexpected response after response-body retry: %#v", response)
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("expected one timed-out response body and one successful retry, got %d calls", calls.Load())
+	}
+
+	callsMu.Lock()
+	defer callsMu.Unlock()
+	if retryDelay := callTimes[1].Sub(callTimes[0]); retryDelay < 70*time.Millisecond {
+		t.Fatalf("retry did not honor Retry-After-Ms: %s", retryDelay)
+	}
+}
+
+func TestRequestKeepsGETAttemptContextThroughResponseBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		time.Sleep(20 * time.Millisecond)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "group-1"})
+	}))
+	t.Cleanup(server.Close)
+
+	maxRetries := 0
+	client := &APIClient{
+		ProviderVersion:       "test",
+		Client:                openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+		requestTimeout:        time.Second,
+		requestAttemptTimeout: 100 * time.Millisecond,
+		slowRequestThreshold:  time.Second,
+		requestMaxRetries:     &maxRetries,
+	}
+
+	response, err := client.Request(
+		context.Background(),
+		http.MethodGet,
+		"/organization/projects/{project_id}/groups",
+		map[string]string{"project_id": "project-1"},
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("Request canceled a healthy response body: %v", err)
+	}
+	if response["id"] != "group-1" {
+		t.Fatalf("unexpected delayed-body response: %#v", response)
+	}
+}
+
+func TestRequestReportsExhaustedGETAttemptTimeouts(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		<-r.Context().Done()
+	}))
+	t.Cleanup(server.Close)
+
+	maxRetries := 0
+	client := &APIClient{
+		ProviderVersion:       "test",
+		Client:                openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+		requestTimeout:        time.Second,
+		requestAttemptTimeout: 10 * time.Millisecond,
+		slowRequestThreshold:  time.Second,
+		requestMaxRetries:     &maxRetries,
+	}
+
+	_, err := client.Request(
+		context.Background(),
+		http.MethodGet,
+		"/organization/projects/{project_id}/groups",
+		map[string]string{"project_id": "secret-project-id"},
+		nil,
+		nil,
+	)
+	if err == nil ||
+		!strings.Contains(err.Error(), "GET /organization/projects/{project_id}/groups exhausted 1 attempt(s)") ||
+		!strings.Contains(err.Error(), "last_status_code=0") {
+		t.Fatalf("expected safe exhausted-attempt diagnostic, got %v", err)
+	}
+	if strings.Contains(err.Error(), "secret-project-id") {
+		t.Fatalf("exhausted-attempt diagnostic contained a concrete project id: %v", err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("expected retries to honor max retries, got %d calls", calls.Load())
+	}
+}
+
+func TestRequestDoesNotApplyAttemptTimeoutToMutation(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		time.Sleep(25 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "group-1"})
+	}))
+	t.Cleanup(server.Close)
+
+	maxRetries := 1
+	client := &APIClient{
+		ProviderVersion:       "test",
+		Client:                openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+		requestTimeout:        time.Second,
+		requestAttemptTimeout: time.Millisecond,
+		slowRequestThreshold:  time.Second,
+		requestMaxRetries:     &maxRetries,
+	}
+
+	if _, err := client.Request(
+		context.Background(),
+		http.MethodPost,
+		"/organization/projects/{project_id}/groups",
+		map[string]string{"project_id": "project-1"},
+		nil,
+		map[string]any{"group_id": "group-1"},
+	); err != nil {
+		t.Fatalf("mutation unexpectedly inherited the GET attempt timeout: %v", err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("expected one mutation request, got %d calls", calls.Load())
 	}
 }
 
