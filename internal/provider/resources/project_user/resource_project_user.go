@@ -80,12 +80,13 @@ func (r *ProjectUserResource) Schema(ctx context.Context, req resource.SchemaReq
 				MarkdownDescription: "email",
 				Required:            false,
 				Optional:            true,
-				Computed:            false,
+				Computed:            true,
 				Sensitive:           false,
 				Validators: []validator.String{
 					openaiapi.StringLengthAtLeast(1),
 				},
 				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 					stringplanmodifier.RequiresReplace(),
 				},
 			},

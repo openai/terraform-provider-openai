@@ -4,7 +4,7 @@ ACC_TEST_TIMEOUT ?= 120m
 ACC_TEST_PACKAGES ?= ./...
 ACC_TEST_CATEGORY_PACKAGES ?= ./internal/provider/resources/...
 ACC_TEST_SCENARIO_PACKAGES ?= ./internal/provider/acctest
-ACC_TEST_RESOURCES_RE ?= ^TestAcc(Certificate|Group|GroupRole|GroupUser|Invite|OrganizationDataRetention|OrganizationSpendAlert|OrganizationUser|Project|ProjectGroup|ProjectGroupRole|ProjectModelPermissions|ProjectRateLimit|ProjectRole|ProjectSpendAlert|ProjectUserRole|UserRole)_
+ACC_TEST_RESOURCES_RE ?= ^TestAcc(Certificate|Group|GroupRole|GroupUser|Invite|OrganizationDataRetention|OrganizationSpendAlert|OrganizationUser|Project|ProjectGroup|ProjectGroupRole|ProjectModelPermissions|ProjectRateLimit|ProjectRole|ProjectSpendAlert|ProjectUser|ProjectUserRole|UserRole)_
 ACC_TEST_DATASOURCES_RE ?= ^TestAccDataSource
 ACC_TEST_SCENARIOS_RE ?= ^TestAccScenario_
 
