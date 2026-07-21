@@ -138,6 +138,239 @@ func TestRequestRejectsPathDotSegments(t *testing.T) {
 	}
 }
 
+func TestRetryAfterDuration(t *testing.T) {
+	now := time.Date(2026, time.July, 20, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name     string
+		status   int
+		headers  map[string]string
+		expected time.Duration
+		ok       bool
+	}{
+		{
+			name:     "standard seconds",
+			status:   http.StatusTooManyRequests,
+			headers:  map[string]string{"Retry-After": "2"},
+			expected: 2 * time.Second,
+			ok:       true,
+		},
+		{
+			name:     "standard HTTP date",
+			status:   http.StatusTooManyRequests,
+			headers:  map[string]string{"Retry-After": now.Add(3 * time.Second).Format(http.TimeFormat)},
+			expected: 3 * time.Second,
+			ok:       true,
+		},
+		{
+			name:     "millisecond extension",
+			status:   http.StatusTooManyRequests,
+			headers:  map[string]string{"Retry-After-Ms": "75", "Retry-After": "2"},
+			expected: 75 * time.Millisecond,
+			ok:       true,
+		},
+		{
+			name:    "non-rate-limit response",
+			status:  http.StatusServiceUnavailable,
+			headers: map[string]string{"Retry-After": "2"},
+		},
+		{
+			name:    "invalid value",
+			status:  http.StatusTooManyRequests,
+			headers: map[string]string{"Retry-After": "later"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := &http.Response{StatusCode: test.status, Header: make(http.Header)}
+			for name, value := range test.headers {
+				response.Header.Set(name, value)
+			}
+			delay, ok := retryAfterDuration(response, now)
+			if ok != test.ok || delay != test.expected {
+				t.Fatalf("retryAfterDuration() = (%s, %t), want (%s, %t)", delay, ok, test.expected, test.ok)
+			}
+		})
+	}
+}
+
+func TestRequestSharesRetryAfterCooldown(t *testing.T) {
+	var calls atomic.Int64
+	var callsMu sync.Mutex
+	var callTimes []time.Time
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		call := calls.Add(1)
+		callsMu.Lock()
+		callTimes = append(callTimes, time.Now())
+		callsMu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if call == 1 {
+			w.Header().Set("Retry-After-Ms", "75")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"error": map[string]any{"message": "retry later", "type": "rate_limit_error"},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "group-1"})
+	}))
+	t.Cleanup(server.Close)
+
+	maxRetries := 0
+	client := &APIClient{
+		ProviderVersion:   "test",
+		Client:            openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+		requestMaxRetries: &maxRetries,
+	}
+	_, err := client.Request(context.Background(), http.MethodGet, "/organization/groups", nil, nil, nil)
+	if err == nil {
+		t.Fatal("expected the first request to return a rate-limit error")
+	}
+	response, err := client.Request(context.Background(), http.MethodGet, "/organization/groups", nil, nil, nil)
+	if err != nil {
+		t.Fatalf("second request returned error after shared cooldown: %v", err)
+	}
+	if response["id"] != "group-1" {
+		t.Fatalf("unexpected response after shared cooldown: %#v", response)
+	}
+
+	callsMu.Lock()
+	defer callsMu.Unlock()
+	if len(callTimes) != 2 {
+		t.Fatalf("expected two requests, got %d", len(callTimes))
+	}
+	if delay := callTimes[1].Sub(callTimes[0]); delay < 70*time.Millisecond {
+		t.Fatalf("shared Retry-After cooldown was not honored: %s", delay)
+	}
+}
+
+func TestRetryAfterCooldownHonorsCancellation(t *testing.T) {
+	cooldown := &retryAfterCooldown{until: time.Now().Add(time.Hour)}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	startedAt := time.Now()
+	_, _, err := cooldown.wait(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("cooldown wait returned %v, want context deadline exceeded", err)
+	}
+	if duration := time.Since(startedAt); duration > time.Second {
+		t.Fatalf("cooldown wait did not stop promptly after cancellation: %s", duration)
+	}
+}
+
+func TestRetryAfterCooldownSerializesDelayedWaiters(t *testing.T) {
+	cooldown := &retryAfterCooldown{until: time.Now().Add(20 * time.Millisecond)}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	entered := make(chan int64, 2)
+	releaseFirst := make(chan struct{})
+	done := make(chan error, 2)
+	var order atomic.Int64
+	for range 2 {
+		go func() {
+			delayed, release, err := cooldown.wait(ctx)
+			if err != nil {
+				done <- err
+				return
+			}
+			defer release()
+			if !delayed {
+				done <- errors.New("waiter did not observe the active cooldown")
+				return
+			}
+			position := order.Add(1)
+			entered <- position
+			if position == 1 {
+				<-releaseFirst
+			}
+			done <- nil
+		}()
+	}
+
+	if position := <-entered; position != 1 {
+		t.Fatalf("first released waiter has position %d", position)
+	}
+	select {
+	case position := <-entered:
+		t.Fatalf("second waiter was released concurrently with position %d", position)
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(releaseFirst)
+	select {
+	case position := <-entered:
+		if position != 2 {
+			t.Fatalf("second released waiter has position %d", position)
+		}
+	case <-ctx.Done():
+		t.Fatal("second waiter was not released after the first completed")
+	}
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestRequestAttemptTimingExcludesSharedCooldown(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "group-1"})
+	}))
+	t.Cleanup(server.Close)
+
+	maxRetries := 0
+	var attemptDuration time.Duration
+	client := &APIClient{
+		ProviderVersion:      "test",
+		Client:               openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+		requestTimeout:       time.Second,
+		slowRequestThreshold: time.Second,
+		requestMaxRetries:    &maxRetries,
+		requestObserver: func(observation requestObservation) {
+			if observation.Phase == requestObservationAttempt {
+				attemptDuration = observation.Duration
+			}
+		},
+	}
+	client.retryAfterCooldown.until = time.Now().Add(250 * time.Millisecond)
+
+	if _, err := client.Request(context.Background(), http.MethodGet, "/organization/groups", nil, nil, nil); err != nil {
+		t.Fatalf("Request returned error after shared cooldown: %v", err)
+	}
+	if attemptDuration <= 0 || attemptDuration >= 200*time.Millisecond {
+		t.Fatalf("attempt duration %s includes the shared cooldown", attemptDuration)
+	}
+}
+
+func TestRequestReportsZeroAttemptsWhenCooldownExhaustsLifecycle(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "group-1"})
+	}))
+	t.Cleanup(server.Close)
+
+	maxRetries := 0
+	client := &APIClient{
+		ProviderVersion:      "test",
+		Client:               openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+		requestTimeout:       20 * time.Millisecond,
+		slowRequestThreshold: time.Second,
+		requestMaxRetries:    &maxRetries,
+	}
+	client.retryAfterCooldown.until = time.Now().Add(time.Second)
+
+	_, err := client.Request(context.Background(), http.MethodGet, "/organization/groups", nil, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "after 0 attempt(s)") {
+		t.Fatalf("expected zero-attempt retry-lifecycle timeout, got %v", err)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("expected no HTTP attempts before cooldown timeout, got %d", calls.Load())
+	}
+}
+
 func TestRequestBoundsRetryLifecycleAndRedactsTelemetry(t *testing.T) {
 	var calls atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
