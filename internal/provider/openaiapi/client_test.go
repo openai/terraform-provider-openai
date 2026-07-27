@@ -381,7 +381,8 @@ func TestRequestAttemptTimingExcludesSharedCooldown(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	maxRetries := 0
-	var attemptDuration time.Duration
+	var attemptObservation requestObservation
+	var lifecycleObservation requestObservation
 	client := &APIClient{
 		ProviderVersion:      "test",
 		Client:               openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
@@ -389,8 +390,11 @@ func TestRequestAttemptTimingExcludesSharedCooldown(t *testing.T) {
 		slowRequestThreshold: time.Second,
 		requestMaxRetries:    &maxRetries,
 		requestObserver: func(observation requestObservation) {
-			if observation.Phase == requestObservationAttempt {
-				attemptDuration = observation.Duration
+			switch observation.Phase {
+			case requestObservationAttempt:
+				attemptObservation = observation
+			case requestObservationLifecycle:
+				lifecycleObservation = observation
 			}
 		},
 	}
@@ -399,8 +403,15 @@ func TestRequestAttemptTimingExcludesSharedCooldown(t *testing.T) {
 	if _, err := client.Request(context.Background(), http.MethodGet, "/organization/groups", nil, nil, nil); err != nil {
 		t.Fatalf("Request returned error after shared cooldown: %v", err)
 	}
-	if attemptDuration <= 0 || attemptDuration >= 200*time.Millisecond {
-		t.Fatalf("attempt duration %s includes the shared cooldown", attemptDuration)
+	if attemptObservation.Duration <= 0 || attemptObservation.Duration >= 200*time.Millisecond {
+		t.Fatalf("attempt duration %s includes the shared cooldown", attemptObservation.Duration)
+	}
+	if attemptObservation.CooldownWaitDuration < 200*time.Millisecond {
+		t.Fatalf("attempt did not report the shared cooldown wait: %#v", attemptObservation)
+	}
+	if lifecycleObservation.CooldownWaitDuration < 200*time.Millisecond ||
+		lifecycleObservation.NonAttemptDuration < lifecycleObservation.CooldownWaitDuration {
+		t.Fatalf("lifecycle did not separate HTTP and shared-cooldown timing: %#v", lifecycleObservation)
 	}
 }
 
@@ -519,10 +530,69 @@ func TestRequestBoundsRetryLifecycleAndRedactsTelemetry(t *testing.T) {
 			if observation.Outcome != requestOutcomeDeadline {
 				t.Fatalf("timed-out lifecycle has outcome %q: %#v", observation.Outcome, observation)
 			}
+			if observation.AttemptCount != 1 ||
+				observation.AttemptDuration <= 0 ||
+				observation.NonAttemptDuration <= 0 ||
+				observation.ResponseBytes <= 0 {
+				t.Fatalf("timed-out lifecycle did not separate request and retry-wait timing: %#v", observation)
+			}
 			if message, failed := client.requestObservationErrorMessage(observation); !failed {
 				t.Fatalf("timed-out lifecycle was not classified as an error: %q %#v", message, observation)
 			}
 		}
+	}
+}
+
+func TestRequestRecordsUnknownMutationResponseBytes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "group-1"})
+	}))
+	t.Cleanup(server.Close)
+
+	maxRetries := 0
+	var observations []requestObservation
+	client := &APIClient{
+		ProviderVersion:   "test",
+		Client:            openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+		requestMaxRetries: &maxRetries,
+		requestObserver: func(observation requestObservation) {
+			observations = append(observations, observation)
+		},
+	}
+
+	response, err := client.Request(
+		context.Background(),
+		http.MethodPost,
+		"/organization/groups",
+		nil,
+		nil,
+		map[string]any{"name": "group-1"},
+	)
+	if err != nil {
+		t.Fatalf("Request returned error: %v", err)
+	}
+	if response["id"] != "group-1" {
+		t.Fatalf("unexpected response: %#v", response)
+	}
+
+	var attemptObservation requestObservation
+	var lifecycleObservation requestObservation
+	for _, observation := range observations {
+		switch observation.Phase {
+		case requestObservationAttempt:
+			attemptObservation = observation
+		case requestObservationLifecycle:
+			lifecycleObservation = observation
+		}
+	}
+	if attemptObservation.ResponseBytes != -1 {
+		t.Fatalf("expected unknown attempt response size, got %#v", attemptObservation)
+	}
+	if lifecycleObservation.ResponseBytes != -1 {
+		t.Fatalf("expected unknown lifecycle response size, got %#v", lifecycleObservation)
 	}
 }
 
@@ -806,6 +876,70 @@ func TestRequestDoesNotApplyAttemptTimeoutToMutation(t *testing.T) {
 	}
 }
 
+func TestRequestUsesAdditionalRetriesForReads(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		call := calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if call <= defaultReadRequestMaxRetries {
+			w.Header().Set("Retry-After-Ms", "1")
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"error": map[string]any{"message": "retry", "type": "server_error"},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "group-1"})
+	}))
+	t.Cleanup(server.Close)
+
+	client := &APIClient{
+		ProviderVersion:      "test",
+		Client:               openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+		requestTimeout:       time.Second,
+		slowRequestThreshold: time.Second,
+	}
+
+	response, err := client.Request(context.Background(), http.MethodGet, "/organization/groups/{group_id}", map[string]string{"group_id": "group-1"}, nil, nil)
+	if err != nil {
+		t.Fatalf("Request returned error after transient server errors: %v", err)
+	}
+	if response["id"] != "group-1" {
+		t.Fatalf("unexpected response after retries: %#v", response)
+	}
+	if calls.Load() != defaultReadRequestMaxRetries+1 {
+		t.Fatalf("expected %d attempts, got %d", defaultReadRequestMaxRetries+1, calls.Load())
+	}
+}
+
+func TestRequestKeepsDefaultRetryBudgetForMutations(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After-Ms", "1")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{"message": "retry", "type": "server_error"},
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	client := &APIClient{
+		ProviderVersion:      "test",
+		Client:               openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+		requestTimeout:       time.Second,
+		slowRequestThreshold: time.Second,
+	}
+
+	if _, err := client.Request(context.Background(), http.MethodDelete, "/organization/groups/{group_id}", map[string]string{"group_id": "group-1"}, nil, nil); err == nil {
+		t.Fatal("expected the mutation to exhaust its retry budget")
+	}
+	if calls.Load() != defaultRequestMaxRetries+1 {
+		t.Fatalf("expected %d attempts, got %d", defaultRequestMaxRetries+1, calls.Load())
+	}
+}
+
 func TestRequestRecordsRetryAttempts(t *testing.T) {
 	var calls atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -870,7 +1004,13 @@ func TestRequestRecordsRetryAttempts(t *testing.T) {
 	if !sawInitialFailure || !sawRetrySuccess {
 		t.Fatalf("expected telemetry for the failed attempt and successful retry, got %#v", observations)
 	}
-	if completedLifecycle.RetryCount != 1 || completedLifecycle.StatusCode != http.StatusOK || completedLifecycle.Outcome != requestOutcomeSuccess {
+	if completedLifecycle.AttemptCount != 2 ||
+		completedLifecycle.RetryCount != 1 ||
+		completedLifecycle.StatusCode != http.StatusOK ||
+		completedLifecycle.Outcome != requestOutcomeSuccess ||
+		completedLifecycle.AttemptDuration <= 0 ||
+		completedLifecycle.NonAttemptDuration <= 0 ||
+		completedLifecycle.ResponseBytes <= 0 {
 		t.Fatalf("expected successful lifecycle to summarize one retry, got %#v", completedLifecycle)
 	}
 	if message, failed := client.requestObservationErrorMessage(completedLifecycle); failed {
@@ -1033,6 +1173,41 @@ func TestPaginatedRequestFollowsNextCursor(t *testing.T) {
 	}
 }
 
+func TestPaginatedRequestClassifiesAPIErrors(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{"message": "failed", "type": "server_error"},
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	maxRetries := 0
+	var observation paginationObservation
+	client := &APIClient{
+		ProviderVersion:   "test",
+		Client:            openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+		requestMaxRetries: &maxRetries,
+		paginationObserver: func(got paginationObservation) {
+			observation = got
+		},
+	}
+	_, err := client.PaginatedRequest(
+		context.Background(),
+		http.MethodGet,
+		"/organization/roles",
+		map[string]string{},
+		map[string]string{"limit": "1"},
+	)
+	if err == nil {
+		t.Fatal("expected PaginatedRequest to return an API error")
+	}
+	if observation.Outcome != requestOutcomeAPIError {
+		t.Fatalf("pagination API error was observed as %q: %v", observation.Outcome, err)
+	}
+}
+
 func TestPaginatedRequestRejectsRepeatedCursor(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1157,9 +1332,16 @@ func TestCachedPaginatedRequestCoalescesConcurrentCalls(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
+	var observationsMu sync.Mutex
+	var observations []responseCacheObservation
 	client := &APIClient{
 		ProviderVersion: "test",
 		Client:          openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+		responseCacheObserver: func(observation responseCacheObservation) {
+			observationsMu.Lock()
+			defer observationsMu.Unlock()
+			observations = append(observations, observation)
+		},
 	}
 	const workers = 32
 	start := make(chan struct{})
@@ -1203,6 +1385,17 @@ func TestCachedPaginatedRequestCoalescesConcurrentCalls(t *testing.T) {
 	}
 	if calls.Load() != 2 {
 		t.Fatalf("expected one two-page traversal, got %d requests", calls.Load())
+	}
+	observationsMu.Lock()
+	defer observationsMu.Unlock()
+	outcomes := map[string]int{}
+	for _, observation := range observations {
+		outcomes[observation.Outcome]++
+	}
+	if len(observations) != workers ||
+		outcomes[responseCacheOutcomeMiss] != 1 ||
+		outcomes[responseCacheOutcomeHit]+outcomes[responseCacheOutcomeCoalesced] != workers-1 {
+		t.Fatalf("unexpected cache telemetry across coalesced requests: %#v", observations)
 	}
 }
 
@@ -1256,6 +1449,149 @@ func TestCachedPaginatedRequestSupportsSingletonCache(t *testing.T) {
 	}
 	if calls.Load() != 2 {
 		t.Fatalf("expected singleton cache invalidation to reload, got %d requests", calls.Load())
+	}
+}
+
+func TestCachedPaginatedRequestReportsSanitizedCacheAndPaginationTelemetry(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("after") {
+		case "":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data":     []map[string]any{{"id": "rl-1"}},
+				"has_more": true,
+				"next":     "secret-cursor",
+			})
+		case "secret-cursor":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data":     []map[string]any{{"id": "rl-2"}},
+				"has_more": false,
+			})
+		default:
+			http.Error(w, "unexpected after cursor", http.StatusBadRequest)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	var cacheObservations []responseCacheObservation
+	var paginationObservations []paginationObservation
+	client := &APIClient{
+		ProviderVersion: "test",
+		Client:          openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+		responseCacheObserver: func(observation responseCacheObservation) {
+			cacheObservations = append(cacheObservations, observation)
+		},
+		paginationObserver: func(observation paginationObservation) {
+			paginationObservations = append(paginationObservations, observation)
+		},
+	}
+	load := func() {
+		t.Helper()
+		_, err := client.CachedPaginatedRequest(
+			context.Background(),
+			"project_rate_limits",
+			[]string{"project_id"},
+			http.MethodGet,
+			"/organization/projects/{project_id}/rate_limits",
+			map[string]string{"project_id": "secret-project-id"},
+			map[string]string{"limit": "1"},
+		)
+		if err != nil {
+			t.Fatalf("CachedPaginatedRequest returned error: %v", err)
+		}
+	}
+
+	load()
+	load()
+
+	if len(cacheObservations) != 2 ||
+		cacheObservations[0].Outcome != responseCacheOutcomeMiss ||
+		cacheObservations[1].Outcome != responseCacheOutcomeHit {
+		t.Fatalf("expected one cache miss followed by one hit, got %#v", cacheObservations)
+	}
+	for _, observation := range cacheObservations {
+		if observation.CacheName != "project_rate_limits" {
+			t.Fatalf("unexpected cache name: %#v", observation)
+		}
+		if strings.Contains(fmt.Sprintf("%#v", observation), "secret-project-id") {
+			t.Fatalf("cache telemetry contained a concrete cache key: %#v", observation)
+		}
+	}
+	if cacheObservations[0].LoadDuration <= 0 || cacheObservations[1].LoadDuration != 0 {
+		t.Fatalf("unexpected cache load timings: %#v", cacheObservations)
+	}
+	if len(paginationObservations) != 1 {
+		t.Fatalf("expected pagination only for the cache miss, got %#v", paginationObservations)
+	}
+	pagination := paginationObservations[0]
+	if pagination.Outcome != requestOutcomeSuccess || pagination.PageCount != 2 || pagination.ItemCount != 2 {
+		t.Fatalf("unexpected pagination telemetry: %#v", pagination)
+	}
+	if pagination.Path != "/organization/projects/{project_id}/rate_limits" ||
+		strings.Contains(fmt.Sprintf("%#v", pagination), "secret-project-id") ||
+		strings.Contains(fmt.Sprintf("%#v", pagination), "secret-cursor") {
+		t.Fatalf("pagination telemetry contained concrete path, key, or cursor values: %#v", pagination)
+	}
+}
+
+func TestResponseCacheReportsCoalescedWait(t *testing.T) {
+	cache := &responseCache{}
+	key := responseCacheKey{name: "project_rate_limits", values: "secret-project-id"}
+	loaderStarted := make(chan struct{})
+	releaseLoader := make(chan struct{})
+	observations := make(chan responseCacheObservation, 2)
+	results := make(chan error, 2)
+
+	go func() {
+		_, err := cache.get(context.Background(), key, func(context.Context) (map[string]any, error) {
+			close(loaderStarted)
+			<-releaseLoader
+			return map[string]any{"data": []any{}}, nil
+		}, func(observation responseCacheObservation) {
+			observations <- observation
+		})
+		results <- err
+	}()
+	<-loaderStarted
+
+	waiterObserved := make(chan struct{})
+	waiterContext := &observedDoneContext{
+		Context:  context.Background(),
+		observed: waiterObserved,
+	}
+	go func() {
+		_, err := cache.get(waiterContext, key, func(context.Context) (map[string]any, error) {
+			return nil, errors.New("coalesced waiter unexpectedly became the loader")
+		}, func(observation responseCacheObservation) {
+			observations <- observation
+		})
+		results <- err
+	}()
+	<-waiterObserved
+	close(releaseLoader)
+
+	for range 2 {
+		if err := <-results; err != nil {
+			t.Fatalf("coalesced cache request returned error: %v", err)
+		}
+	}
+	first := <-observations
+	second := <-observations
+	byOutcome := map[string]responseCacheObservation{
+		first.Outcome:  first,
+		second.Outcome: second,
+	}
+	if _, ok := byOutcome[responseCacheOutcomeMiss]; !ok {
+		t.Fatalf("missing cache-miss observation: %#v %#v", first, second)
+	}
+	coalesced, ok := byOutcome[responseCacheOutcomeCoalesced]
+	if !ok || coalesced.WaitDuration <= 0 {
+		t.Fatalf("missing coalesced cache-wait observation: %#v %#v", first, second)
+	}
+	for _, observation := range []responseCacheObservation{first, second} {
+		if strings.Contains(fmt.Sprintf("%#v", observation), "secret-project-id") {
+			t.Fatalf("cache telemetry contained a concrete cache key: %#v", observation)
+		}
 	}
 }
 
@@ -1360,7 +1696,7 @@ func TestResponseCacheRetriesAfterLateInvalidation(t *testing.T) {
 			id = "rl-old"
 		}
 		return map[string]any{"data": []any{map[string]any{"id": id}}}, nil
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("response cache get returned error: %v", err)
 	}
@@ -1382,7 +1718,7 @@ func TestResponseCacheEvictsLeastRecentlyUsedEntry(t *testing.T) {
 		_, err := cache.get(context.Background(), key, func(context.Context) (map[string]any, error) {
 			loads[projectID]++
 			return map[string]any{"project_id": projectID}, nil
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("cache read for %s returned error: %v", projectID, err)
 		}
@@ -1445,10 +1781,10 @@ func TestResponseCacheDoesNotCacheErrors(t *testing.T) {
 		return map[string]any{"data": []any{}}, nil
 	}
 
-	if _, err := cache.get(context.Background(), key, load); err == nil {
+	if _, err := cache.get(context.Background(), key, load, nil); err == nil {
 		t.Fatal("expected first cache load to fail")
 	}
-	if _, err := cache.get(context.Background(), key, load); err != nil {
+	if _, err := cache.get(context.Background(), key, load, nil); err != nil {
 		t.Fatalf("expected failed load to be retried, got %v", err)
 	}
 	if loads != 2 {
@@ -1479,7 +1815,7 @@ func TestResponseCacheRetriesWhenLoaderContextIsCanceled(t *testing.T) {
 			close(firstStarted)
 			<-ctx.Done()
 			return nil, ctx.Err()
-		})
+		}, nil)
 		firstError <- err
 	}()
 	<-firstStarted
@@ -1496,7 +1832,7 @@ func TestResponseCacheRetriesWhenLoaderContextIsCanceled(t *testing.T) {
 		response, err := cache.get(waiterContext, key, func(context.Context) (map[string]any, error) {
 			loads.Add(1)
 			return map[string]any{"data": []any{map[string]any{"id": "rl-fresh"}}}, nil
-		})
+		}, nil)
 		waiterResult <- response
 		waiterError <- err
 	}()
@@ -1524,13 +1860,19 @@ func TestResponseCacheRetainsSuccessfulLoadWhenLoaderContextEnds(t *testing.T) {
 	key := responseCacheKey{name: "project_rate_limits", values: "proj-1"}
 	loaderContext, cancelLoader := context.WithCancel(context.Background())
 	t.Cleanup(cancelLoader)
+	var observation responseCacheObservation
 
 	response, err := cache.get(loaderContext, key, func(context.Context) (map[string]any, error) {
 		cancelLoader()
 		return map[string]any{"data": []any{map[string]any{"id": "rl-success"}}}, nil
+	}, func(got responseCacheObservation) {
+		observation = got
 	})
 	if err != nil {
 		t.Fatalf("successful load returned error: %v", err)
+	}
+	if observation.Outcome != responseCacheOutcomeMiss {
+		t.Fatalf("successful load was observed as %q, want %q", observation.Outcome, responseCacheOutcomeMiss)
 	}
 	items, err := ResponseObjectList(response, "data", true)
 	if err != nil || len(items) != 1 || items[0]["id"] != "rl-success" {
@@ -1570,7 +1912,7 @@ func TestResponseCacheSharesLoaderLocalDeadline(t *testing.T) {
 
 	firstError := make(chan error, 1)
 	go func() {
-		_, err := cache.get(context.Background(), key, load)
+		_, err := cache.get(context.Background(), key, load, nil)
 		firstError <- err
 	}()
 	<-firstStarted
@@ -1582,7 +1924,7 @@ func TestResponseCacheSharesLoaderLocalDeadline(t *testing.T) {
 	}
 	waiterError := make(chan error, 1)
 	go func() {
-		_, err := cache.get(waiterContext, key, load)
+		_, err := cache.get(waiterContext, key, load, nil)
 		waiterError <- err
 	}()
 	<-waiterObserved
@@ -1621,7 +1963,7 @@ func TestResponseCacheKeysAreIsolatedDuringInvalidation(t *testing.T) {
 		_, err := cache.get(context.Background(), key, func(context.Context) (map[string]any, error) {
 			loads[projectID]++
 			return map[string]any{"project_id": projectID}, nil
-		})
+		}, nil)
 		if err != nil {
 			t.Fatalf("cache read for %s returned error: %v", projectID, err)
 		}
@@ -1684,7 +2026,7 @@ func BenchmarkResponseCacheRetainedHeap(b *testing.B) {
 			}
 			if _, err := cache.get(context.Background(), key, func(context.Context) (map[string]any, error) {
 				return response, nil
-			}); err != nil {
+			}, nil); err != nil {
 				b.Fatalf("cache load returned error: %v", err)
 			}
 		}
