@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.7.0](https://github.com/openai/terraform-provider-openai/compare/v0.6.1...v0.7.0) (2026-07-27)
+
+
+### Performance Improvements
+
+* optimize provider plan requests ([#38](https://github.com/openai/terraform-provider-openai/issues/38)) ([b969b4b](https://github.com/openai/terraform-provider-openai/commit/b969b4b))
+
+### Bug Fixes
+
+* address provider review regressions ([#40](https://github.com/openai/terraform-provider-openai/issues/40)) ([dd96f47](https://github.com/openai/terraform-provider-openai/commit/dd96f47))
+* retry timed-out provider reads ([#43](https://github.com/openai/terraform-provider-openai/issues/43)) ([472c15c](https://github.com/openai/terraform-provider-openai/commit/472c15c))
+
+### Documentation
+
+* add security policy ([#31](https://github.com/openai/terraform-provider-openai/issues/31)) ([8584bbe](https://github.com/openai/terraform-provider-openai/commit/8584bbe))
+* clarify project service account lifecycle documentation ([#49](https://github.com/openai/terraform-provider-openai/issues/49)) ([3d25706](https://github.com/openai/terraform-provider-openai/commit/3d25706))
+* document project roles and improve rate-limit handling ([#50](https://github.com/openai/terraform-provider-openai/issues/50)) ([be43cff](https://github.com/openai/terraform-provider-openai/commit/be43cff))
+* regenerate field-specific documentation examples ([#29](https://github.com/openai/terraform-provider-openai/issues/29)) ([e943e14](https://github.com/openai/terraform-provider-openai/commit/e943e14))
+
+### Dependencies and Security
+
+* add advanced CodeQL workflow for complete Go coverage ([#33](https://github.com/openai/terraform-provider-openai/issues/33)) ([e1ddf60](https://github.com/openai/terraform-provider-openai/commit/e1ddf60))
+* bump GitHub Actions dependencies ([#7](https://github.com/openai/terraform-provider-openai/issues/7)) ([c85f8e5](https://github.com/openai/terraform-provider-openai/commit/c85f8e5))
+* bump `actions/setup-go` in the GitHub Actions group ([#42](https://github.com/openai/terraform-provider-openai/issues/42)) ([def215d](https://github.com/openai/terraform-provider-openai/commit/def215d))
+* bump `github.com/openai/openai-go/v3` from 3.43.0 to 3.44.0 ([#41](https://github.com/openai/terraform-provider-openai/issues/41)) ([dd35d6e](https://github.com/openai/terraform-provider-openai/commit/dd35d6e))
+* bump `github.com/openai/openai-go/v3` from 3.44.0 to 3.46.0 ([#46](https://github.com/openai/terraform-provider-openai/issues/46)) ([448169d](https://github.com/openai/terraform-provider-openai/commit/448169d))
+* bump `golang.org/x/crypto` from 0.45.0 to 0.52.0 in `tools` ([#30](https://github.com/openai/terraform-provider-openai/issues/30)) ([a786d09](https://github.com/openai/terraform-provider-openai/commit/a786d09))
+* bump `golang.org/x/crypto` from 0.50.0 to 0.52.0 ([#32](https://github.com/openai/terraform-provider-openai/issues/32)) ([1d146c1](https://github.com/openai/terraform-provider-openai/commit/1d146c1))
+* bump `golang.org/x/net` from 0.54.0 to 0.55.0 ([#37](https://github.com/openai/terraform-provider-openai/issues/37)) ([6568bf5](https://github.com/openai/terraform-provider-openai/commit/6568bf5))
+* bump `google.golang.org/grpc` from 1.79.3 to 1.82.1 ([#47](https://github.com/openai/terraform-provider-openai/issues/47)) ([d887888](https://github.com/openai/terraform-provider-openai/commit/d887888))
+
 ## [0.6.0](https://github.com/openai/terraform-provider-openai/compare/v0.5.0...v0.6.0) (2026-07-16)
 
 
