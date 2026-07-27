@@ -43,7 +43,7 @@ func (r *ProjectServiceAccountResource) Metadata(ctx context.Context, req resour
 
 func (r *ProjectServiceAccountResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manage a project service account. This resource creates the service account without default project roles and without an API key. To use the service account as a credential, separately assign a project role and create or manage an API key through the appropriate API or provider workflow.",
+		MarkdownDescription: "Manage a project service account. This resource sets `create_service_account_only=true` and creates only the service account; it does not assign roles or create an API key. Manage role assignments using separate Terraform resources, and create and manage API keys outside Terraform using the public API.",
 		Attributes: map[string]schema.Attribute{
 			"project_id": schema.StringAttribute{
 				MarkdownDescription: "project id",

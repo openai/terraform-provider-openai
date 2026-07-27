@@ -3,12 +3,12 @@
 page_title: "openai_project_service_account Resource - openai"
 subcategory: ""
 description: |-
-  Manage a project service account. This resource creates the service account without default project roles and without an API key. To use the service account as a credential, separately assign a project role and create or manage an API key through the appropriate API or provider workflow.
+  Manage a project service account. This resource sets create_service_account_only=true and creates only the service account; it does not assign roles or create an API key. Manage role assignments using separate Terraform resources, and create and manage API keys outside Terraform using the public API.
 ---
 
 # openai_project_service_account (Resource)
 
-Manage a project service account. This resource creates the service account without default project roles and without an API key. To use the service account as a credential, separately assign a project role and create or manage an API key through the appropriate API or provider workflow.
+Manage a project service account. This resource sets `create_service_account_only=true` and creates only the service account; it does not assign roles or create an API key. Manage role assignments using separate Terraform resources, and create and manage API keys outside Terraform using the public API.
 
 ## Example Usage
 
