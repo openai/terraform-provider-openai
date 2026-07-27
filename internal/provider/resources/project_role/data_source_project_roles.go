@@ -47,7 +47,7 @@ func (d *ProjectRolesDataSource) Metadata(ctx context.Context, req datasource.Me
 
 func (d *ProjectRolesDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "List project roles.",
+		MarkdownDescription: "List the built-in and custom roles available to a project. Built-in role IDs are `role-api-project-member`, `role-api-project-owner`, and `role-api-project-viewer`. Filter the returned roles by `predefined_role` and `name` to discover a built-in role ID dynamically.",
 		Attributes: map[string]schema.Attribute{
 			"project_id": schema.StringAttribute{
 				MarkdownDescription: "project id",

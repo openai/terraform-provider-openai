@@ -3,12 +3,12 @@
 page_title: "openai_project_group_role Resource - openai"
 subcategory: ""
 description: |-
-  Manage a project-level role assignment for a group.
+  Manage a project-level role assignment for a group. Built-in project role IDs are role-api-project-member, role-api-project-owner, and role-api-project-viewer. Use the openai_project_roles data source to discover the roles available to a project dynamically.
 ---
 
 # openai_project_group_role (Resource)
 
-Manage a project-level role assignment for a group.
+Manage a project-level role assignment for a group. Built-in project role IDs are `role-api-project-member`, `role-api-project-owner`, and `role-api-project-viewer`. Use the `openai_project_roles` data source to discover the roles available to a project dynamically.
 
 ## Example Usage
 
@@ -16,7 +16,7 @@ Manage a project-level role assignment for a group.
 resource "openai_project_group_role" "example" {
   project_id = "proj_123"
   group_id   = "group_123"
-  role_id    = "role_123"
+  role_id    = "role-api-project-member"
 }
 ```
 
@@ -27,7 +27,7 @@ resource "openai_project_group_role" "example" {
 
 - `group_id` (String) group id
 - `project_id` (String) project id
-- `role_id` (String) role id
+- `role_id` (String) Project role ID. Built-in roles are `role-api-project-member`, `role-api-project-owner`, and `role-api-project-viewer`; available roles can also be discovered using `openai_project_roles`.
 
 ## Import
 
@@ -38,6 +38,6 @@ In Terraform v1.5.0 and later, the [`import` block](https://developer.hashicorp.
 ```terraform
 import {
   to = openai_project_group_role.example
-  id = "proj_123/group_123/role_123"
+  id = "proj_123/group_123/role-api-project-member"
 }
 ```

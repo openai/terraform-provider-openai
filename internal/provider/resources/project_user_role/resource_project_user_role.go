@@ -46,7 +46,7 @@ func (r *ProjectUserRoleResource) Metadata(ctx context.Context, req resource.Met
 
 func (r *ProjectUserRoleResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manage a project-level role assignment for a user.",
+		MarkdownDescription: "Manage a project-level role assignment for a user. Built-in project role IDs are `role-api-project-member`, `role-api-project-owner`, and `role-api-project-viewer`. Use the `openai_project_roles` data source to discover the roles available to a project dynamically.",
 		Attributes: map[string]schema.Attribute{
 			"project_id": schema.StringAttribute{
 				MarkdownDescription: "project id",
@@ -77,7 +77,7 @@ func (r *ProjectUserRoleResource) Schema(ctx context.Context, req resource.Schem
 				},
 			},
 			"role_id": schema.StringAttribute{
-				MarkdownDescription: "role id",
+				MarkdownDescription: "Project role ID. Built-in roles are `role-api-project-member`, `role-api-project-owner`, and `role-api-project-viewer`; available roles can also be discovered using `openai_project_roles`.",
 				Required:            true,
 				Optional:            false,
 				Computed:            false,

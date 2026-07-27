@@ -3,18 +3,26 @@
 page_title: "openai_project_roles Data Source - openai"
 subcategory: ""
 description: |-
-  List project roles.
+  List the built-in and custom roles available to a project. Built-in role IDs are role-api-project-member, role-api-project-owner, and role-api-project-viewer. Filter the returned roles by predefined_role and name to discover a built-in role ID dynamically.
 ---
 
 # openai_project_roles (Data Source)
 
-List project roles.
+List the built-in and custom roles available to a project. Built-in role IDs are `role-api-project-member`, `role-api-project-owner`, and `role-api-project-viewer`. Filter the returned roles by `predefined_role` and `name` to discover a built-in role ID dynamically.
 
 ## Example Usage
 
 ```terraform
-data "openai_project_roles" "example" {
-  project_id = "proj_123"
+data "openai_project_roles" "available" {
+  project_id = var.project_id
+}
+
+locals {
+  member_role_id = one([
+    for role in data.openai_project_roles.available.roles :
+    role.id
+    if role.predefined_role && role.name == "member"
+  ])
 }
 ```
 

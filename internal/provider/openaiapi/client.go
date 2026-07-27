@@ -27,13 +27,14 @@ import (
 )
 
 type APIClient struct {
-	AdminAPIKey     string
-	BaseURL         string
-	Organization    string
-	Project         string
-	ProviderVersion string
-	Client          openai.Client
-	responseCache   responseCache
+	AdminAPIKey        string
+	BaseURL            string
+	Organization       string
+	Project            string
+	ProviderVersion    string
+	Client             openai.Client
+	responseCache      responseCache
+	retryAfterCooldown retryAfterCooldown
 
 	// The following fields are test hooks. Provider operation uses the bounded
 	// defaults below.
@@ -328,6 +329,128 @@ type requestLifecycleState struct {
 	lastStatusCode atomic.Int64
 }
 
+type retryAfterCooldown struct {
+	mu          sync.Mutex
+	until       time.Time
+	generation  uint64
+	releaseOnce sync.Once
+	releaseGate chan struct{}
+}
+
+func retryAfterDuration(response *http.Response, now time.Time) (time.Duration, bool) {
+	if response == nil || response.StatusCode != http.StatusTooManyRequests {
+		return 0, false
+	}
+	if value := strings.TrimSpace(response.Header.Get("Retry-After-Ms")); value != "" {
+		if delay, err := time.ParseDuration(value + "ms"); err == nil && delay > 0 {
+			return delay, true
+		}
+	}
+	value := strings.TrimSpace(response.Header.Get("Retry-After"))
+	if value == "" {
+		return 0, false
+	}
+	if delay, err := time.ParseDuration(value + "s"); err == nil && delay > 0 {
+		return delay, true
+	}
+	if retryAt, err := http.ParseTime(value); err == nil {
+		if delay := retryAt.Sub(now); delay > 0 {
+			return delay, true
+		}
+	}
+	return 0, false
+}
+
+func (c *retryAfterCooldown) observeResponse(response *http.Response, now time.Time, coordinated bool, generation uint64) {
+	delay, ok := retryAfterDuration(response, now)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if ok {
+		until := now.Add(delay)
+		if until.After(c.until) {
+			c.until = until
+		}
+		c.generation++
+		return
+	}
+	if coordinated &&
+		response != nil &&
+		response.StatusCode != http.StatusTooManyRequests &&
+		c.generation == generation {
+		c.until = time.Time{}
+	}
+}
+
+func (c *retryAfterCooldown) acquireDelayedRelease(ctx context.Context) (func(), error) {
+	c.releaseOnce.Do(func() {
+		c.releaseGate = make(chan struct{}, 1)
+		c.releaseGate <- struct{}{}
+	})
+	if err := ctx.Err(); err != nil {
+		return func() {}, err
+	}
+	select {
+	case <-ctx.Done():
+		return func() {}, ctx.Err()
+	case <-c.releaseGate:
+		if err := ctx.Err(); err != nil {
+			c.releaseGate <- struct{}{}
+			return func() {}, err
+		}
+		var releaseOnce sync.Once
+		return func() {
+			releaseOnce.Do(func() {
+				c.releaseGate <- struct{}{}
+			})
+		}, nil
+	}
+}
+
+func (c *retryAfterCooldown) wait(ctx context.Context) (bool, uint64, func(), error) {
+	coordinated := false
+	var generation uint64
+	for {
+		c.mu.Lock()
+		until := c.until
+		currentGeneration := c.generation
+		c.mu.Unlock()
+		if until.IsZero() {
+			if !coordinated {
+				return false, 0, func() {}, nil
+			}
+		} else {
+			coordinated = true
+			generation = currentGeneration
+			if delay := time.Until(until); delay > 0 {
+				timer := time.NewTimer(delay)
+				select {
+				case <-ctx.Done():
+					if !timer.Stop() {
+						<-timer.C
+					}
+					return true, generation, func() {}, ctx.Err()
+				case <-timer.C:
+				}
+				continue
+			}
+		}
+
+		release, err := c.acquireDelayedRelease(ctx)
+		if err != nil {
+			return true, generation, func() {}, err
+		}
+		c.mu.Lock()
+		until = c.until
+		generation = c.generation
+		c.mu.Unlock()
+		if !until.IsZero() && time.Until(until) > 0 {
+			release()
+			continue
+		}
+		return true, generation, release, nil
+	}
+}
+
 func (s *requestLifecycleState) beginAttempt() int {
 	return int(s.attempts.Add(1) - 1)
 }
@@ -336,13 +459,13 @@ func (s *requestLifecycleState) recordStatusCode(statusCode int) {
 	s.lastStatusCode.Store(int64(statusCode))
 }
 
-func (s *requestLifecycleState) snapshot() (int, int) {
+func (s *requestLifecycleState) snapshot() (int, int, int) {
 	attempts := s.attempts.Load()
 	retryCount := 0
 	if attempts > 0 {
 		retryCount = int(attempts - 1)
 	}
-	return retryCount, int(s.lastStatusCode.Load())
+	return int(attempts), retryCount, int(s.lastStatusCode.Load())
 }
 
 func (c *APIClient) effectiveRequestTimeout() time.Duration {
@@ -452,6 +575,11 @@ func (c *APIClient) recordRequestObservation(ctx context.Context, observation re
 
 func (c *APIClient) requestTelemetryMiddleware(ctx context.Context, method string, path string, lifecycle *requestLifecycleState) option.Middleware {
 	return func(request *http.Request, next option.MiddlewareNext) (*http.Response, error) {
+		coordinatedCooldown, cooldownGeneration, releaseCooldown, err := c.retryAfterCooldown.wait(request.Context())
+		if err != nil {
+			return nil, err
+		}
+		defer releaseCooldown()
 		startedAt := time.Now()
 		retryCount := lifecycle.beginAttempt()
 
@@ -463,6 +591,8 @@ func (c *APIClient) requestTelemetryMiddleware(ctx context.Context, method strin
 			attemptRequest = request.Clone(attemptContext)
 		}
 		response, err := next(attemptRequest)
+		c.retryAfterCooldown.observeResponse(response, time.Now(), coordinatedCooldown, cooldownGeneration)
+		releaseCooldown()
 		statusCode := 0
 		if response != nil {
 			statusCode = response.StatusCode
@@ -529,7 +659,7 @@ func (c *APIClient) Request(ctx context.Context, method string, path string, pat
 	pendingTimerDone := make(chan struct{})
 	pendingTimer := time.AfterFunc(slowThreshold, func() {
 		defer close(pendingTimerDone)
-		retryCount, statusCode := lifecycle.snapshot()
+		_, retryCount, statusCode := lifecycle.snapshot()
 		c.recordRequestObservation(ctx, requestObservation{
 			Phase:      requestObservationPending,
 			Outcome:    requestOutcomePending,
@@ -567,7 +697,7 @@ func (c *APIClient) Request(ctx context.Context, method string, path string, pat
 		return nil, fmt.Errorf("unsupported OpenAI API method %q", method)
 	}
 	stopPendingTimer()
-	retryCount, statusCode := lifecycle.snapshot()
+	attemptCount, retryCount, statusCode := lifecycle.snapshot()
 	c.recordRequestObservation(ctx, requestObservation{
 		Phase:      requestObservationLifecycle,
 		Outcome:    classifyRequestOutcome(err, requestContext.Err(), statusCode),
@@ -585,7 +715,7 @@ func (c *APIClient) Request(ctx context.Context, method string, path string, pat
 				method,
 				path,
 				requestTimeout,
-				retryCount+1,
+				attemptCount,
 				statusCode,
 				context.DeadlineExceeded,
 			)
@@ -595,7 +725,7 @@ func (c *APIClient) Request(ctx context.Context, method string, path string, pat
 				"OpenAI API %s %s exhausted %d attempt(s) after per-attempt timeouts within the %s retry lifecycle (last_status_code=%d): %w",
 				method,
 				path,
-				retryCount+1,
+				attemptCount,
 				requestTimeout,
 				statusCode,
 				context.DeadlineExceeded,
