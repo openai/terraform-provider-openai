@@ -3,12 +3,12 @@
 page_title: "openai_project_user_role Data Source - openai"
 subcategory: ""
 description: |-
-  Look up a project-level role assignment for a user.
+  Look up a project-level role assignment for a user. Built-in project role IDs are role-api-project-member, role-api-project-owner, and role-api-project-viewer. Use openai_project_roles to discover the roles available to a project dynamically.
 ---
 
 # openai_project_user_role (Data Source)
 
-Look up a project-level role assignment for a user.
+Look up a project-level role assignment for a user. Built-in project role IDs are `role-api-project-member`, `role-api-project-owner`, and `role-api-project-viewer`. Use `openai_project_roles` to discover the roles available to a project dynamically.
 
 ## Example Usage
 
@@ -16,7 +16,7 @@ Look up a project-level role assignment for a user.
 data "openai_project_user_role" "example" {
   project_id = "proj_123"
   user_id    = "user_123"
-  role_id    = "role_123"
+  role_id    = "role-api-project-member"
 }
 ```
 
@@ -26,7 +26,7 @@ data "openai_project_user_role" "example" {
 ### Required
 
 - `project_id` (String) project id
-- `role_id` (String) role id
+- `role_id` (String) Project role ID. Built-in roles are `role-api-project-member`, `role-api-project-owner`, and `role-api-project-viewer`; available roles can also be discovered using `openai_project_roles`.
 - `user_id` (String) user id
 
 ### Read-Only

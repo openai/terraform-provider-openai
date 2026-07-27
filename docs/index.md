@@ -19,6 +19,54 @@ Terraform provider for OpenAI administration APIs, specific to the API Platform.
 export OPENAI_ADMIN_KEY="<your-admin-api-key>"
 ```
 
+## Project roles
+
+Projects include the following built-in roles:
+
+- Project member: `role-api-project-member`.
+- Project owner: `role-api-project-owner`.
+- Project viewer: `role-api-project-viewer`.
+
+Assign a built-in role to a user with `openai_project_user_role`:
+
+```terraform
+resource "openai_project_user_role" "member" {
+  project_id = var.project_id
+  user_id    = var.user_id
+  role_id    = "role-api-project-member"
+}
+```
+
+Assign a built-in role to a group with `openai_project_group_role`:
+
+```terraform
+resource "openai_project_group_role" "member" {
+  project_id = var.project_id
+  group_id   = var.group_id
+  role_id    = "role-api-project-member"
+}
+```
+
+Use `openai_project_roles` to discover the roles available to a project
+dynamically:
+
+```terraform
+data "openai_project_roles" "available" {
+  project_id = var.project_id
+}
+
+locals {
+  member_role_id = one([
+    for role in data.openai_project_roles.available.roles :
+    role.id
+    if role.predefined_role && role.name == "member"
+  ])
+}
+```
+
+Use `local.member_role_id` as the `role_id` in either assignment resource to
+assign the dynamically discovered built-in member role.
+
 ## Example Usage
 
 ```terraform
