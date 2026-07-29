@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.0.0](https://github.com/openai/terraform-provider-openai/compare/v0.7.0...v1.0.0) (2026-07-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* remove deprecated aggregate project rate limits resource ([#53](https://github.com/openai/terraform-provider-openai/issues/53))
+
+### Features
+
+* remove deprecated aggregate project rate limits resource ([#53](https://github.com/openai/terraform-provider-openai/issues/53)) ([fcc946c](https://github.com/openai/terraform-provider-openai/commit/fcc946c6bf63725e2e36b669040f7c0a367c9d33))
+
+
+### Performance Improvements
+
+* improve provider request resilience and telemetry ([#51](https://github.com/openai/terraform-provider-openai/issues/51)) ([ef1b6e5](https://github.com/openai/terraform-provider-openai/commit/ef1b6e5571394633a58f37602eb7366162815e65))
+
 ## [0.7.0](https://github.com/openai/terraform-provider-openai/compare/v0.6.1...v0.7.0) (2026-07-27)
 
 
