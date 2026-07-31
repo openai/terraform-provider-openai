@@ -156,7 +156,15 @@ func (r *ProjectUserResource) Create(ctx context.Context, req resource.CreateReq
 	openaiapi.AddStringBodyField(body, "user_id", configData.UserID)
 	openaiapi.AddStringBodyField(body, "email", configData.Email)
 	openaiapi.AddStringBodyField(body, "role", data.Role)
+	if err := r.client.InvalidateResponseCache("project_users_first_page", []string{"project_id"}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	responseData, err := r.client.Request(ctx, "POST", "/organization/projects/{project_id}/users", pathParams, queryParams, body)
+	if err := r.client.InvalidateResponseCache("project_users_first_page", []string{"project_id"}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	if err != nil {
 		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
 		return
@@ -196,10 +204,11 @@ func (r *ProjectUserResource) Read(ctx context.Context, req resource.ReadRequest
 	}
 	pathParams := map[string]string{
 		"project_id": data.ProjectID.ValueString(),
-		"user_id":    data.UserID.ValueString(),
 	}
-	queryParams := map[string]string{}
-	responseData, err := r.client.Request(ctx, "GET", "/organization/projects/{project_id}/users/{user_id}", pathParams, queryParams, nil)
+	queryParams := map[string]string{
+		"limit": "100",
+	}
+	responseData, err := r.client.CachedRequest(ctx, "project_users_first_page", []string{"project_id"}, "GET", "/organization/projects/{project_id}/users", pathParams, queryParams)
 	if err != nil {
 		if openaiapi.IsNotFound(err) {
 			resp.State.RemoveResource(ctx)
@@ -207,6 +216,39 @@ func (r *ProjectUserResource) Read(ctx context.Context, req resource.ReadRequest
 		}
 		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
 		return
+	}
+	selectedResponseData, found, err := openaiapi.ResponseObjectByField(responseData, "data", "id", data.UserID.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
+		return
+	}
+	if found {
+		responseData = selectedResponseData
+	} else {
+		var fallbackCondition types.Bool
+		if err := openaiapi.ApplyBoolResponseField(responseData, []string{"has_more"}, &fallbackCondition, true); err != nil {
+			resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
+			return
+		}
+		if !fallbackCondition.ValueBool() {
+			resp.State.RemoveResource(ctx)
+			return
+		}
+		fallbackPathParams := map[string]string{
+			"project_id": data.ProjectID.ValueString(),
+			"user_id":    data.UserID.ValueString(),
+		}
+		fallbackQueryParams := map[string]string{}
+		fallbackResponseData, fallbackErr := r.client.Request(ctx, "GET", "/organization/projects/{project_id}/users/{user_id}", fallbackPathParams, fallbackQueryParams, nil)
+		if fallbackErr != nil {
+			if openaiapi.IsNotFound(fallbackErr) {
+				resp.State.RemoveResource(ctx)
+				return
+			}
+			resp.Diagnostics.AddError("OpenAI API request failed", fallbackErr.Error())
+			return
+		}
+		responseData = fallbackResponseData
 	}
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"id"}, &data.UserID, true); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
@@ -249,7 +291,15 @@ func (r *ProjectUserResource) Update(ctx context.Context, req resource.UpdateReq
 	queryParams := map[string]string{}
 	body := map[string]any{}
 	openaiapi.AddStringBodyField(body, "role", data.Role)
+	if err := r.client.InvalidateResponseCache("project_users_first_page", []string{"project_id"}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	responseData, err := r.client.Request(ctx, "POST", "/organization/projects/{project_id}/users/{user_id}", pathParams, queryParams, body)
+	if err := r.client.InvalidateResponseCache("project_users_first_page", []string{"project_id"}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	if err != nil {
 		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
 		return
@@ -292,7 +342,15 @@ func (r *ProjectUserResource) Delete(ctx context.Context, req resource.DeleteReq
 		"user_id":    data.UserID.ValueString(),
 	}
 	queryParams := map[string]string{}
+	if err := r.client.InvalidateResponseCache("project_users_first_page", []string{"project_id"}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	responseData, err := r.client.Request(ctx, "DELETE", "/organization/projects/{project_id}/users/{user_id}", pathParams, queryParams, nil)
+	if err := r.client.InvalidateResponseCache("project_users_first_page", []string{"project_id"}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	if err != nil {
 		if openaiapi.IsNotFound(err) {
 			resp.State.RemoveResource(ctx)

@@ -286,6 +286,24 @@ func (c *responseCache) invalidate(key responseCacheKey) {
 	entry.invalidated = true
 }
 
+// CachedRequest coalesces concurrent cache misses and retains one successful
+// response without following pagination. Callers must treat the response as immutable.
+func (c *APIClient) CachedRequest(ctx context.Context, cacheName string, cacheKeyFields []string, method string, path string, pathParams map[string]string, queryParams map[string]string) (map[string]any, error) {
+	ctx = openAIClientLogContext(ctx)
+	if method != http.MethodGet {
+		return nil, fmt.Errorf("cached requests require GET, got %q", method)
+	}
+	key, err := buildResponseCacheKey(cacheName, pathParams, cacheKeyFields)
+	if err != nil {
+		return nil, err
+	}
+	return c.responseCache.get(ctx, key, func(loadCtx context.Context) (map[string]any, error) {
+		return c.Request(loadCtx, method, path, pathParams, queryParams, nil)
+	}, func(observation responseCacheObservation) {
+		c.recordResponseCacheObservation(ctx, observation)
+	})
+}
+
 // CachedPaginatedRequest coalesces concurrent cache misses and retains a bounded
 // set of recently used successful responses. An empty cacheKeyFields slice creates
 // one entry per API client and cache name. Callers must treat the response as immutable.
