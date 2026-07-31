@@ -1309,6 +1309,49 @@ func TestPaginatedRequestRejectsMissingCursorWhenMorePagesRemain(t *testing.T) {
 	}
 }
 
+func TestCachedRequestCachesOnlyTheFirstPage(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data":     []map[string]any{{"id": "user-1"}},
+			"has_more": true,
+			"next":     "user-1",
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	client := &APIClient{
+		ProviderVersion: "test",
+		Client:          openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+	}
+	for range 2 {
+		response, err := client.CachedRequest(
+			context.Background(),
+			"project_users_first_page",
+			[]string{"project_id"},
+			http.MethodGet,
+			"/organization/projects/{project_id}/users",
+			map[string]string{"project_id": "proj-1"},
+			map[string]string{"limit": "100"},
+		)
+		if err != nil {
+			t.Fatalf("CachedRequest returned error: %v", err)
+		}
+		items, err := ResponseObjectList(response, "data", true)
+		if err != nil || len(items) != 1 || items[0]["id"] != "user-1" {
+			t.Fatalf("unexpected cached response: %#v, err=%v", response, err)
+		}
+		if hasMore, ok := response["has_more"].(bool); !ok || !hasMore {
+			t.Fatalf("expected an incomplete first page, got %#v", response)
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("expected one cached page request, got %d", calls.Load())
+	}
+}
+
 func TestCachedPaginatedRequestCoalescesConcurrentCalls(t *testing.T) {
 	var calls atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

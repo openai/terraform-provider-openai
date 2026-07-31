@@ -168,7 +168,15 @@ func (r *ProjectUserRoleResource) Create(ctx context.Context, req resource.Creat
 	queryParams := map[string]string{}
 	body := map[string]any{}
 	openaiapi.AddStringBodyField(body, "role_id", data.RoleID)
+	if err := r.client.InvalidateResponseCache("project_users_first_page", []string{"project_id"}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	responseData, err := r.client.Request(ctx, "POST", "/projects/{project_id}/users/{user_id}/roles", pathParams, queryParams, body)
+	if err := r.client.InvalidateResponseCache("project_users_first_page", []string{"project_id"}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	if err != nil {
 		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
 		return
@@ -274,7 +282,15 @@ func (r *ProjectUserRoleResource) Delete(ctx context.Context, req resource.Delet
 		"role_id":    data.RoleID.ValueString(),
 	}
 	queryParams := map[string]string{}
+	if err := r.client.InvalidateResponseCache("project_users_first_page", []string{"project_id"}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	responseData, err := r.client.Request(ctx, "DELETE", "/projects/{project_id}/users/{user_id}/roles/{role_id}", pathParams, queryParams, nil)
+	if err := r.client.InvalidateResponseCache("project_users_first_page", []string{"project_id"}, pathParams); err != nil {
+		resp.Diagnostics.AddError("Invalid response cache key", err.Error())
+		return
+	}
 	if err != nil {
 		if openaiapi.IsNotFound(err) {
 			resp.State.RemoveResource(ctx)
