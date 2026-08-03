@@ -24,7 +24,7 @@ permissions:
 
 jobs:
   analyze:
-    name: Analyze (${{ matrix.language }})
+    name: CodeQL (${{ matrix.language }})
     runs-on: ubuntu-latest
 
     # These settings are ignored by the Actions extractor. Supplying an
