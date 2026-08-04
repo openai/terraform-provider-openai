@@ -10,7 +10,7 @@ permissions: {}
 jobs:
   release-please:
     runs-on: ubuntu-latest
-    environment: release-please
+    environment: release
     steps:
       - name: Create release app token
         id: app-token
