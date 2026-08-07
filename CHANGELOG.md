@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/openai/terraform-provider-openai/compare/v1.0.0...v1.0.1) (2026-08-07)
+
+
+### Performance Improvements
+
+* cache bounded project user reads ([#55](https://github.com/openai/terraform-provider-openai/issues/55)) ([74b2673](https://github.com/openai/terraform-provider-openai/commit/74b26730e3b44fd6e1ab1571a71ca745ca38771e))
+
 ## [1.0.0](https://github.com/openai/terraform-provider-openai/compare/v0.7.0...v1.0.0) (2026-07-29)
 
 
