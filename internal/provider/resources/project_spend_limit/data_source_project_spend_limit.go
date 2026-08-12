@@ -63,7 +63,7 @@ func (d *ProjectSpendLimitDataSource) Schema(ctx context.Context, req datasource
 				Sensitive:           false,
 			},
 			"threshold_amount": schema.Int64Attribute{
-				MarkdownDescription: "threshold amount",
+				MarkdownDescription: "Hard spend limit amount, in cents.",
 				Required:            false,
 				Optional:            false,
 				Computed:            true,

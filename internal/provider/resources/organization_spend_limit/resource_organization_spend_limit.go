@@ -67,7 +67,7 @@ func (r *OrganizationSpendLimitResource) Schema(ctx context.Context, req resourc
 				},
 			},
 			"threshold_amount": schema.Int64Attribute{
-				MarkdownDescription: "threshold amount",
+				MarkdownDescription: "Hard spend limit amount, in cents.",
 				Required:            true,
 				Optional:            false,
 				Computed:            false,

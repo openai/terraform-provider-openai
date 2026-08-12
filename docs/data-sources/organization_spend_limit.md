@@ -28,4 +28,4 @@ data "openai_organization_spend_limit" "example" {
 - `interval` (String) interval
 - `object` (String) object
 - `response_json` (String) Raw JSON response returned by the OpenAI API.
-- `threshold_amount` (Number) threshold amount
+- `threshold_amount` (Number) Hard spend limit amount, in cents.

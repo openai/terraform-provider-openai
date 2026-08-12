@@ -15,7 +15,7 @@ Manage a project hard spend limit.
 ```terraform
 resource "openai_project_spend_limit" "example" {
   project_id       = "proj_123"
-  threshold_amount = 20
+  threshold_amount = 10000
   currency         = "USD"
   interval         = "month"
 }
@@ -29,7 +29,7 @@ resource "openai_project_spend_limit" "example" {
 - `currency` (String) currency
 - `interval` (String) interval
 - `project_id` (String) project id
-- `threshold_amount` (Number) threshold amount
+- `threshold_amount` (Number) Hard spend limit amount, in cents.
 
 ### Read-Only
 

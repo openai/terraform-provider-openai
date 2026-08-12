@@ -14,7 +14,7 @@ Manage the organization hard spend limit.
 
 ```terraform
 resource "openai_organization_spend_limit" "example" {
-  threshold_amount = 20
+  threshold_amount = 10000
   currency         = "USD"
   interval         = "month"
 }
@@ -27,7 +27,7 @@ resource "openai_organization_spend_limit" "example" {
 
 - `currency` (String) currency
 - `interval` (String) interval
-- `threshold_amount` (Number) threshold amount
+- `threshold_amount` (Number) Hard spend limit amount, in cents.
 
 ### Read-Only
 
