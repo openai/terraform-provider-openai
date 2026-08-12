@@ -72,6 +72,9 @@ func (r *OrganizationSpendLimitResource) Schema(ctx context.Context, req resourc
 				Optional:            false,
 				Computed:            false,
 				Sensitive:           false,
+				Validators: []validator.Int64{
+					openaiapi.Int64AtLeast(1),
+				},
 			},
 			"currency": schema.StringAttribute{
 				MarkdownDescription: "currency",
@@ -99,9 +102,6 @@ func (r *OrganizationSpendLimitResource) Schema(ctx context.Context, req resourc
 				Optional:            false,
 				Computed:            true,
 				Sensitive:           false,
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
 			},
 		},
 	}

@@ -1386,6 +1386,31 @@ func (v stringLengthAtLeastValidator) ValidateString(ctx context.Context, req va
 	}
 }
 
+type int64AtLeastValidator struct {
+	min int64
+}
+
+func Int64AtLeast(min int64) validator.Int64 {
+	return int64AtLeastValidator{min: min}
+}
+
+func (v int64AtLeastValidator) Description(ctx context.Context) string {
+	return fmt.Sprintf("value must be at least %d", v.min)
+}
+
+func (v int64AtLeastValidator) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+func (v int64AtLeastValidator) ValidateInt64(ctx context.Context, req validator.Int64Request, resp *validator.Int64Response) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	if req.ConfigValue.ValueInt64() < v.min {
+		resp.Diagnostics.AddAttributeError(req.Path, "Invalid integer value", fmt.Sprintf("Value must be at least %d.", v.min))
+	}
+}
+
 type stringIsValidPathParameterValidator struct{}
 
 func StringIsValidPathParameter() validator.String {
