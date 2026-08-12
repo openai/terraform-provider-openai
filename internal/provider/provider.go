@@ -22,6 +22,7 @@ import (
 	resourceinvite "github.com/openai/terraform-provider-openai/internal/provider/resources/invite"
 	resourceorganizationdataretention "github.com/openai/terraform-provider-openai/internal/provider/resources/organization_data_retention"
 	resourceorganizationspendalert "github.com/openai/terraform-provider-openai/internal/provider/resources/organization_spend_alert"
+	resourceorganizationspendlimit "github.com/openai/terraform-provider-openai/internal/provider/resources/organization_spend_limit"
 	resourceorganizationuser "github.com/openai/terraform-provider-openai/internal/provider/resources/organization_user"
 	resourceproject "github.com/openai/terraform-provider-openai/internal/provider/resources/project"
 	resourceprojectcertificates "github.com/openai/terraform-provider-openai/internal/provider/resources/project_certificates"
@@ -34,6 +35,7 @@ import (
 	resourceprojectrole "github.com/openai/terraform-provider-openai/internal/provider/resources/project_role"
 	resourceprojectserviceaccount "github.com/openai/terraform-provider-openai/internal/provider/resources/project_service_account"
 	resourceprojectspendalert "github.com/openai/terraform-provider-openai/internal/provider/resources/project_spend_alert"
+	resourceprojectspendlimit "github.com/openai/terraform-provider-openai/internal/provider/resources/project_spend_limit"
 	resourceprojectuser "github.com/openai/terraform-provider-openai/internal/provider/resources/project_user"
 	resourceprojectuserrole "github.com/openai/terraform-provider-openai/internal/provider/resources/project_user_role"
 	resourcerole "github.com/openai/terraform-provider-openai/internal/provider/resources/role"
@@ -165,9 +167,11 @@ func (p *OpenAIProvider) Resources(ctx context.Context) []func() resource.Resour
 		resourceprojectserviceaccount.NewProjectServiceAccountResource,
 		resourcecertificate.NewCertificateResource,
 		resourceorganizationdataretention.NewOrganizationDataRetentionResource,
+		resourceorganizationspendlimit.NewOrganizationSpendLimitResource,
 		resourceprojectmodelpermissions.NewProjectModelPermissionsResource,
 		resourceprojecthostedtoolpermissions.NewProjectHostedToolPermissionsResource,
 		resourceprojectdataretention.NewProjectDataRetentionResource,
+		resourceprojectspendlimit.NewProjectSpendLimitResource,
 	}
 }
 
@@ -193,9 +197,11 @@ func (p *OpenAIProvider) DataSources(ctx context.Context) []func() datasource.Da
 		resourcecertificate.NewCertificateDataSource,
 		resourcecertificate.NewCertificatesDataSource,
 		resourceorganizationdataretention.NewOrganizationDataRetentionDataSource,
+		resourceorganizationspendlimit.NewOrganizationSpendLimitDataSource,
 		resourceprojectmodelpermissions.NewProjectModelPermissionsDataSource,
 		resourceprojecthostedtoolpermissions.NewProjectHostedToolPermissionsDataSource,
 		resourceprojectdataretention.NewProjectDataRetentionDataSource,
+		resourceprojectspendlimit.NewProjectSpendLimitDataSource,
 		resourceprojectcertificates.NewProjectCertificatesDataSource,
 		resourceorganizationspendalert.NewOrganizationSpendAlertsDataSource,
 		resourceprojectspendalert.NewProjectSpendAlertDataSource,
