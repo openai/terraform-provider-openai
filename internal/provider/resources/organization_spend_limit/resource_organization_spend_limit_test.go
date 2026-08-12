@@ -198,3 +198,26 @@ func TestSpendLimitThresholdMinimumRejectedDuringPlan(t *testing.T) {
 		t.Fatalf("expected invalid threshold to fail before API calls, got posts=%d gets=%d deletes=%d", len(state.postBodies), state.getCalls, state.deleteCalls)
 	}
 }
+
+func TestSpendLimitRejectsInvalidSingletonImportID(t *testing.T) {
+	server, state := newSpendLimitServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: spendLimitProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config:        spendLimitConfig(server.URL, 10000),
+				ResourceName:  "openai_organization_spend_limit.test",
+				ImportState:   true,
+				ImportStateId: "not-organization",
+				ExpectError:   regexp.MustCompile("Invalid import ID"),
+			},
+		},
+	})
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if len(state.postBodies) != 0 || state.getCalls != 0 || state.deleteCalls != 0 {
+		t.Fatalf("expected invalid import ID to fail before API calls, got posts=%d gets=%d deletes=%d", len(state.postBodies), state.getCalls, state.deleteCalls)
+	}
+}

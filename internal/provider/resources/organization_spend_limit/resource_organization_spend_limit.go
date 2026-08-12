@@ -286,5 +286,9 @@ func (r *OrganizationSpendLimitResource) ImportState(ctx context.Context, req re
 		resp.Diagnostics.AddError("Invalid import ID", fmt.Sprintf("Expected import ID format %q.", "organization"))
 		return
 	}
+	if parts[0] != "organization" {
+		resp.Diagnostics.AddError("Invalid import ID", fmt.Sprintf("Expected import ID %q.", "organization"))
+		return
+	}
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("singleton_id"), parts[0])...)
 }
