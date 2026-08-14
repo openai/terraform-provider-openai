@@ -36,6 +36,11 @@ archives:
 - formats:
   - zip
   name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+sboms:
+- id: provider-archives
+  artifacts: archive
+  documents:
+    - '${artifact}.spdx.json'
 checksum:
   extra_files:
     - glob: 'terraform-registry-manifest.json'
