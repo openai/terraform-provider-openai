@@ -49,7 +49,7 @@ To publish a provider version:
 
 The `Release` workflow waits for the `publish` environment checks, imports the GPG key from environment secrets, and runs GoReleaser. GoReleaser builds OS/architecture zip files, generates an SPDX JSON software bill of materials (SBOM) for each zip, includes the SBOMs in the signed checksum file, includes `terraform-registry-manifest.json`, and creates the GitHub Release.
 
-CI builds a snapshot release and verifies that every provider zip has a non-empty SBOM listed in the checksum file. A release must not be published if the `Release SBOM` check fails.
+CI builds a snapshot release and verifies that every provider zip has a non-empty SBOM listed in the checksum file. The tag-triggered `Release` workflow runs the same `Release SBOM` verification before its publish job, so a release cannot be published if that check fails.
 
 Once the public Terraform Registry is connected to the public repository, finalized GitHub Releases are ingested by the Registry.
 

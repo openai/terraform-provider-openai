@@ -153,36 +153,5 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Install Syft
-        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
-        with:
-          syft-version: v1.51.0
-
-      - name: Build release snapshot and SBOMs
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
-        with:
-          distribution: goreleaser
-          version: v2.16.0
-          args: release --snapshot --clean --skip=sign
-
       - name: Verify release SBOMs
-        shell: bash
-        run: |
-          archive_count="$(find dist -type f -name '*.zip' | wc -l | tr -d ' ')"
-          sbom_count="$(find dist -type f -name '*.spdx.json' | wc -l | tr -d ' ')"
-          checksum_file="$(find dist -type f -name '*_SHA256SUMS' -print -quit)"
-
-          test "$archive_count" -gt 0
-          test "$sbom_count" -eq "$archive_count"
-          test -n "$checksum_file"
-
-          while IFS= read -r -d '' sbom; do
-            jq -e '.spdxVersion and (.packages | length > 0)' "$sbom" >/dev/null
-            grep -Fq "  $(basename "$sbom")" "$checksum_file"
-          done < <(find dist -type f -name '*.spdx.json' -print0)
+        uses: ./.github/actions/verify-release-sboms

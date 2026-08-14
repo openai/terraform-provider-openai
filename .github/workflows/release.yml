@@ -9,7 +9,22 @@ permissions:
   contents: write
 
 jobs:
+  release-sbom:
+    name: Release SBOM
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Verify release SBOMs
+        uses: ./.github/actions/verify-release-sboms
+
   goreleaser:
+    needs: release-sbom
     runs-on: ubuntu-latest
     environment: publish
     steps:
