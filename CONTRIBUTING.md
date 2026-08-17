@@ -88,11 +88,11 @@ store credentials in Terraform state. Manage role assignments separately and
 keep API-key creation outside Terraform.
 
 Run focused offline unit tests or the standard unit-test suite with `TF_ACC`
-unset:
+explicitly removed, even when it was exported by an earlier acceptance run:
 
 ```sh
-go test ./internal/provider/openaiapi ./internal/provider
-go test ./...
+env -u TF_ACC go test ./internal/provider/openaiapi ./internal/provider
+env -u TF_ACC go test ./...
 ```
 
 Check Terraform example formatting when relevant:
