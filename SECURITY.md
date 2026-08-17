@@ -1,14 +1,28 @@
 # Security Policy
 
-## Reporting Security Issues
+## Reporting a vulnerability
 
-To report a security issue in the OpenAI Terraform Provider, email disclosure@openai.com.
+Please report potential security vulnerabilities in the OpenAI Terraform Provider or its release artifacts privately by emailing disclosure@openai.com.
+
+Do not report security vulnerabilities through public GitHub issues, pull requests, or discussions.
+
+This policy applies to the OpenAI Terraform Provider and its release artifacts. For security issues in OpenAI services or other OpenAI products, use the same OpenAI disclosure process.
+
+## What to include
+
+Please include:
+
+- The affected package or product and version, including any affected Terraform provider release or release artifact.
+- A clear description of the vulnerability and its potential impact.
+- Sanitized reproduction steps or a minimal proof of concept.
+
+Do not include live credentials, API keys, customer data, or unredacted sensitive logs.
+
+## Coordinated disclosure
+
+Please give the maintainers a reasonable opportunity to investigate and address the issue before public disclosure.
+
+Please coordinate respectfully with OpenAI's security team.
 
 Please follow OpenAI's coordinated vulnerability disclosure policy:
 https://openai.com/policies/coordinated-vulnerability-disclosure-policy
-
-Do not disclose the issue publicly until OpenAI has had a reasonable opportunity to investigate and address it.
-
-## Scope
-
-This policy applies to the OpenAI Terraform Provider and its release artifacts. For security issues in OpenAI services or other OpenAI products, use the same OpenAI disclosure process.
