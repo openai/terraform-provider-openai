@@ -1,0 +1,11 @@
+name: Install authenticated release tools
+description: Install pinned GoReleaser and Syft archives authenticated against committed SHA-256 digests.
+
+runs:
+  using: composite
+  steps:
+    - name: Install authenticated release tools
+      shell: bash
+      env:
+        RELEASE_TOOLS_ACTION_PATH: ${{ github.action_path }}
+      run: bash "$RELEASE_TOOLS_ACTION_PATH/install.sh"
