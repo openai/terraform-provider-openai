@@ -49,13 +49,17 @@ To publish a provider version:
 
 The `Release` workflow waits for the `publish` environment checks, imports the GPG key from environment secrets, and runs GoReleaser. GoReleaser builds OS/architecture zip files, generates an SPDX JSON software bill of materials (SBOM) for each zip, includes the SBOMs in the signed checksum file, includes `terraform-registry-manifest.json`, and creates the GitHub Release.
 
-CI builds a snapshot release and verifies that every provider zip has a non-empty SBOM listed in the checksum file. The tag-triggered `Release` workflow runs the same `Release SBOM` verification before its publish job, so a release cannot be published if that check fails.
+CI builds a snapshot release and verifies that every provider zip has a non-empty SBOM listed in the checksum file. The tag-triggered `Release` workflow runs the same `Release SBOM` verification before its publish job, so a release cannot be published if that check fails. Both the snapshot and publish jobs first verify their own checked-out provider dependencies before building artifacts.
 
 Once the public Terraform Registry is connected to the public repository, finalized GitHub Releases are ingested by the Registry.
 
 ## Release Security
 
 The `publish` environment approval is the security boundary for release signing. Before approving a release job, reviewers should verify that the tag points at the intended reviewed commit and that the release workflow and `.goreleaser.yml` at that commit are expected.
+
+Each release job runs `go mod download` and `go mod verify`, then fails if either committed provider lockfile (`go.mod` or `go.sum`) changed. This verification completes before the publish job accesses the GPG private key or passphrase. GoReleaser builds with `-mod=readonly`, `GONOPROXY=none`, and `GOPROXY=off`, so it can only use the already-verified dependency cache and cannot resolve or rewrite dependencies after signing credentials are imported, even when private-module settings are configured.
+
+When changing provider dependencies, run `go mod tidy` during normal development, commit the resulting `go.mod` and `go.sum` together, and verify them locally with `go mod download`, `go mod verify`, and `git diff --exit-code -- go.mod go.sum`. Never add dependency-mutating hooks to `.goreleaser.yml` or move dependency verification after signing-key import.
 
 Recommended repository settings:
 

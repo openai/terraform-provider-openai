@@ -1,0 +1,12 @@
+name: Verify release dependencies
+description: Download and verify the committed Go module graph before building release artifacts.
+
+runs:
+  using: composite
+  steps:
+    - name: Verify committed Go modules
+      shell: bash
+      run: |
+        go mod download
+        go mod verify
+        git diff --exit-code -- go.mod go.sum
