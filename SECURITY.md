@@ -12,11 +12,15 @@ This policy applies to the OpenAI Terraform Provider and its release artifacts. 
 
 Please include:
 
-- The affected package or product and version, including any affected Terraform provider release or release artifact.
+- The affected Terraform provider release, release artifact, or relevant source commit.
 - A clear description of the vulnerability and its potential impact.
 - Sanitized reproduction steps or a minimal proof of concept.
+- When relevant, the Terraform version, operating system, architecture, and
+  installation method.
 
 Do not include live credentials, API keys, customer data, or unredacted sensitive logs.
+Do not attach raw Terraform state, saved plans, crash output, or TF_LOG/provider
+traces; provide only sanitized excerpts.
 
 ## Coordinated disclosure
 
