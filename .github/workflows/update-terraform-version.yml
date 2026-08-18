@@ -28,6 +28,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: main
           token: ${{ steps.app-token.outputs.token }}
           fetch-depth: 0
 
@@ -66,10 +67,10 @@ jobs:
             echo "latest_version=$latest_version"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Create or update Terraform version pull request
-        if: ${{ steps.terraform-version.outputs.changed == 'true' }}
+      - name: Manage Terraform version pull request
         env:
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          CHANGED: ${{ steps.terraform-version.outputs.changed }}
           CURRENT_VERSION: ${{ steps.terraform-version.outputs.current_version }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           LATEST_VERSION: ${{ steps.terraform-version.outputs.latest_version }}
@@ -77,6 +78,18 @@ jobs:
           set -euo pipefail
 
           branch="automation/update-terraform-version"
+          pull_request="$(
+            gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --state open \
+              --json number --jq '.[0].number // empty'
+          )"
+
+          if [[ "$CHANGED" != "true" ]]; then
+            if [[ -n "$pull_request" ]]; then
+              gh pr close "$pull_request" --repo "$GITHUB_REPOSITORY" --delete-branch
+            fi
+            exit 0
+          fi
+
           title="build: update Terraform to $LATEST_VERSION"
           bot_login="${APP_SLUG}[bot]"
           bot_id="$(gh api "/users/$bot_login" --jq .id)"
@@ -97,11 +110,6 @@ jobs:
             "" \
             "All Terraform CI jobs read their version from .terraform-version." \
             > "$body_file"
-
-          pull_request="$(
-            gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --state open \
-              --json number --jq '.[0].number // empty'
-          )"
 
           if [[ -n "$pull_request" ]]; then
             gh pr edit "$pull_request" --repo "$GITHUB_REPOSITORY" \
