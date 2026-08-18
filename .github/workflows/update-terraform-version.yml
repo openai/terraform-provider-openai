@@ -1,0 +1,112 @@
+name: Update Terraform Version
+
+on:
+  schedule:
+    - cron: "17 10 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: update-terraform-version
+
+jobs:
+  update-terraform-version:
+    runs-on: ubuntu-latest
+    environment: release
+
+    steps:
+      - name: Create SDK app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.OPENAI_SDKS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.OPENAI_SDKS_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+
+      - name: Check latest stable Terraform version
+        id: terraform-version
+        run: |
+          set -euo pipefail
+
+          latest_version="$(
+            curl --fail --silent --show-error --location \
+              https://api.github.com/repos/hashicorp/terraform/releases/latest |
+              jq --exit-status --raw-output \
+                '.tag_name | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")) | ltrimstr("v")'
+          )"
+          current_version="$(cat .terraform-version)"
+
+          if [[ ! "$current_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid pinned Terraform version: $current_version" >&2
+            exit 1
+          fi
+
+          if [[ "$latest_version" == "$current_version" ]]; then
+            echo "Terraform $current_version is already current."
+            exit 0
+          fi
+
+          highest_version="$(printf '%s\n' "$current_version" "$latest_version" | sort -V | tail -n 1)"
+          if [[ "$highest_version" != "$latest_version" ]]; then
+            echo "Pinned Terraform $current_version is newer than the latest stable release $latest_version."
+            exit 0
+          fi
+
+          {
+            echo "changed=true"
+            echo "current_version=$current_version"
+            echo "latest_version=$latest_version"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create or update Terraform version pull request
+        if: ${{ steps.terraform-version.outputs.changed == 'true' }}
+        env:
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          CURRENT_VERSION: ${{ steps.terraform-version.outputs.current_version }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          LATEST_VERSION: ${{ steps.terraform-version.outputs.latest_version }}
+        run: |
+          set -euo pipefail
+
+          branch="automation/update-terraform-version"
+          title="build: update Terraform to $LATEST_VERSION"
+          bot_login="${APP_SLUG}[bot]"
+          bot_id="$(gh api "/users/$bot_login" --jq .id)"
+
+          git config user.name "$bot_login"
+          git config user.email "$bot_id+$bot_login@users.noreply.github.com"
+          git switch --force-create "$branch"
+          printf '%s\n' "$LATEST_VERSION" > .terraform-version
+          git add .terraform-version
+          git commit --message "$title"
+          git push --force-with-lease origin "$branch"
+
+          body_file="$(mktemp)"
+          printf '%s\n' \
+            "Updates the pinned Terraform CLI from $CURRENT_VERSION to $LATEST_VERSION." \
+            "" \
+            "Release notes: https://github.com/hashicorp/terraform/releases/tag/v$LATEST_VERSION" \
+            "" \
+            "All Terraform CI jobs read their version from .terraform-version." \
+            > "$body_file"
+
+          pull_request="$(
+            gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --state open \
+              --json number --jq '.[0].number // empty'
+          )"
+
+          if [[ -n "$pull_request" ]]; then
+            gh pr edit "$pull_request" --repo "$GITHUB_REPOSITORY" \
+              --title "$title" --body-file "$body_file"
+          else
+            gh pr create --repo "$GITHUB_REPOSITORY" --head "$branch" --base main \
+              --title "$title" --body-file "$body_file"
+          fi
