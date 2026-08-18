@@ -287,8 +287,6 @@
     "main.go": "bbf7b87127a002ba12400fabede83dfcbfd9d376ab8db85c889f60645011bb2a",
     "templates/index.md.tmpl": "95ab116d95eace26b885217bbfdb35ad6426c4a8d23f2e44570d75b92afc6f05",
     "terraform-registry-manifest.json": "f809ab383cca0a5f83072981c64208cbd7fa67e986a86ee02dd2c82333221e32",
-    "tools/go.mod": "509f09427816e99f751b681d716e2c5cfd05548407a7e914cb2dcd1f202de452",
-    "tools/go.sum": "fc308b080c1fe8dc0d564f1fadfae4e86986f901014da7683684b6761a85fd71",
     "tools/tools.go": "97cf694f9eaeb3aab1087fd08787f3f36d4cfbe127c9baf426d5365d4515b52e"
   },
   "version": 1
