@@ -87,12 +87,27 @@ Service-account resources must not create API keys, assign roles implicitly, or
 store credentials in Terraform state. Manage role assignments separately and
 keep API-key creation outside Terraform.
 
-Run focused offline unit tests or the standard unit-test suite with `TF_ACC`
-explicitly removed, even when it was exported by an earlier acceptance run:
+Run focused offline unit tests or the standard unit-test suite in a subshell
+that removes acceptance-test opt-in, live credentials, organization/project
+identifiers, and every acceptance fixture while preserving unrelated settings:
 
 ```sh
-env -u TF_ACC go test ./internal/provider/openaiapi ./internal/provider
-env -u TF_ACC go test ./...
+offline_go_test() (
+  unset TF_ACC OPENAI_ADMIN_KEY OPENAI_API_KEY \
+    OPENAI_ORG_ID OPENAI_ORGANIZATION OPENAI_ORGANIZATION_ID \
+    OPENAI_PROJECT OPENAI_PROJECT_ID || exit 1
+
+  fixture_names=$(env | awk -F= \
+    '$1 ~ /^OPENAI_TF_ACC_[A-Za-z_][A-Za-z0-9_]*$/ { print $1 }') || exit 1
+  for name in $fixture_names; do
+    unset "$name" || exit 1
+  done
+
+  go test "$@"
+)
+
+offline_go_test ./internal/provider/openaiapi ./internal/provider
+offline_go_test ./...
 ```
 
 Check Terraform example formatting when relevant:
