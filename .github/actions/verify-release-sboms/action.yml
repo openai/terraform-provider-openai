@@ -22,9 +22,7 @@ runs:
 
     - name: Build release snapshot and SBOMs
       shell: bash
-      run: |
-        export PATH="$RELEASE_TOOLS_DIR:$PATH"
-        "$RELEASE_TOOLS_DIR/goreleaser" release --snapshot --clean --skip=sign
+      run: python3 .github/actions/verify-release-sboms/verify-syft-boundary.py
       env:
         GONOPROXY: "none"
         GOPROXY: "off"
