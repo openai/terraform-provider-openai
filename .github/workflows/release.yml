@@ -35,20 +35,21 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
 
-      - name: Install Syft
-        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
-        with:
-          syft-version: v1.51.0
+      - name: Install authenticated release tools
+        uses: ./.github/actions/setup-release-tools
+
+      - name: Verify release dependencies
+        uses: ./.github/actions/verify-release-dependencies
 
       - name: Check publish environment secrets
         env:
-          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-          PASSPHRASE: ${{ secrets.PASSPHRASE }}
+          HAS_GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+          HAS_GPG_PASSPHRASE: ${{ secrets.PASSPHRASE != '' }}
         run: |
-          test -n "$GPG_PRIVATE_KEY"
-          test -n "$PASSPHRASE"
+          test "$HAS_GPG_PRIVATE_KEY" = true
+          test "$HAS_GPG_PASSPHRASE" = true
 
       - name: Import GPG key
         id: import_gpg
@@ -58,11 +59,11 @@ jobs:
           passphrase: ${{ secrets.PASSPHRASE }}
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
-        with:
-          distribution: goreleaser
-          version: v2.16.0
-          args: release --clean
+        run: |
+          export PATH="$RELEASE_TOOLS_DIR:$PATH"
+          "$RELEASE_TOOLS_DIR/goreleaser" release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
+          GONOPROXY: "none"
+          GOPROXY: "off"

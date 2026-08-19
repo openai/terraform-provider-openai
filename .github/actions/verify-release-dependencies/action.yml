@@ -1,0 +1,22 @@
+name: Verify release dependencies
+description: Download and verify the committed Go module graph before building release artifacts.
+
+runs:
+  using: composite
+  steps:
+    - name: Verify committed Go modules
+      shell: bash
+      env:
+        RELEASE_DEPENDENCY_ACTION_PATH: ${{ github.action_path }}
+      run: |
+        source "$RELEASE_DEPENDENCY_ACTION_PATH/trusted-release-environment.sh"
+
+        GOMODCACHE="$(mktemp -d "${RUNNER_TEMP}/verified-release-go-modules.XXXXXXXX")"
+        GOCACHE="$(mktemp -d "${RUNNER_TEMP}/verified-release-go-build.XXXXXXXX")"
+        export GOMODCACHE GOCACHE
+        printf 'GOMODCACHE=%s\n' "$GOMODCACHE" >> "$GITHUB_ENV"
+        printf 'GOCACHE=%s\n' "$GOCACHE" >> "$GITHUB_ENV"
+
+        go mod download
+        go mod verify
+        git diff --exit-code -- go.mod go.sum

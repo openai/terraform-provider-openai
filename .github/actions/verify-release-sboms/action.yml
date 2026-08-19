@@ -8,19 +8,31 @@ runs:
       uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       with:
         go-version-file: go.mod
-        cache: true
+        cache: false
 
-    - name: Install Syft
-      uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
-      with:
-        syft-version: v1.51.0
+    - name: Test release tool authentication
+      shell: bash
+      run: bash .github/actions/setup-release-tools/install_test.sh
+
+    - name: Install authenticated release tools
+      uses: ./.github/actions/setup-release-tools
+
+    - name: Verify release dependencies
+      uses: ./.github/actions/verify-release-dependencies
+
+    - name: Verify trusted release execution environment
+      shell: bash
+      run: python3 .github/actions/verify-release-dependencies/verify-release-environment.py
+      env:
+        GONOPROXY: "none"
+        GOPROXY: "off"
 
     - name: Build release snapshot and SBOMs
-      uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
-      with:
-        distribution: goreleaser
-        version: v2.16.0
-        args: release --snapshot --clean --skip=sign
+      shell: bash
+      run: python3 .github/actions/verify-release-sboms/verify-syft-boundary.py
+      env:
+        GONOPROXY: "none"
+        GOPROXY: "off"
 
     - name: Verify release SBOMs
       shell: bash
