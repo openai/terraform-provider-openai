@@ -31,11 +31,12 @@ func run(args []string) error {
 		return errors.New("signing target does not match verified checksum manifest")
 	}
 
-	manifest, mode, err := readChecksumSnapshot(args[0])
+	manifest, mode, err := readArtifactSnapshot(args[0])
 	if err != nil {
 		return err
 	}
-	if err := verifyReleaseSnapshot(args[0], manifest); err != nil {
+	var metadata []verifiedArtifact
+	if err := verifyReleaseSnapshot(args[0], manifest, &metadata); err != nil {
 		return err
 	}
 	if len(args) == 1 {
@@ -51,18 +52,19 @@ func run(args []string) error {
 	if err := sign.Run(); err != nil {
 		return fmt.Errorf("sign verified checksum manifest: %w", err)
 	}
-	return publishVerifiedChecksums(args[0], manifest, mode)
+	for _, artifact := range metadata {
+		if err := publishVerifiedSnapshot(artifact.path, artifact.contents, artifact.mode); err != nil {
+			return fmt.Errorf("publish verified release metadata %q: %w", artifact.name, err)
+		}
+	}
+	return publishVerifiedSnapshot(args[0], manifest, mode)
 }
 
 func verifyRelease(checksumPath string) error {
-	manifest, _, err := readChecksumSnapshot(checksumPath)
-	if err != nil {
-		return err
-	}
-	return verifyReleaseSnapshot(checksumPath, manifest)
+	return run([]string{checksumPath})
 }
 
-func verifyReleaseSnapshot(checksumPath string, manifest []byte) error {
+func verifyReleaseSnapshot(checksumPath string, manifest []byte, metadata *[]verifiedArtifact) error {
 	checksums, err := readChecksums(manifest)
 	if err != nil {
 		return err
@@ -116,12 +118,11 @@ func verifyReleaseSnapshot(checksumPath string, manifest []byte) error {
 	}
 	registryName := releaseName + "_manifest.json"
 	registryPath := filepath.Join(filepath.Dir(filepath.Dir(checksumPath)), "terraform-registry-manifest.json")
-	if err := verifyArtifact(registryName, registryPath, checksums); err != nil {
+	registry, err := verifyMetadataArtifact(registryName, registryPath, checksums, verifyRegistryManifest)
+	if err != nil {
 		return err
 	}
-	if err := verifyRegistryManifest(registryPath); err != nil {
-		return err
-	}
+	*metadata = append(*metadata, registry)
 
 	for name, path := range archives {
 		if err := verifyReleasePlatform(name, releaseName); err != nil {
@@ -135,12 +136,11 @@ func verifyReleaseSnapshot(checksumPath string, manifest []byte) error {
 		if err := verifyArtifact(name, path, checksums); err != nil {
 			return err
 		}
-		if err := verifyArtifact(sbomName, sbomPath, checksums); err != nil {
+		sbom, err := verifyMetadataArtifact(sbomName, sbomPath, checksums, verifySPDX)
+		if err != nil {
 			return err
 		}
-		if err := verifySPDX(sbomPath); err != nil {
-			return err
-		}
+		*metadata = append(*metadata, sbom)
 	}
 
 	for name := range checksums {
@@ -161,27 +161,27 @@ func verifyReleaseSnapshot(checksumPath string, manifest []byte) error {
 	return nil
 }
 
-func readChecksumSnapshot(path string) ([]byte, fs.FileMode, error) {
+func readArtifactSnapshot(path string) ([]byte, fs.FileMode, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, 0, fmt.Errorf("read checksum manifest: %w", err)
+		return nil, 0, fmt.Errorf("read release artifact snapshot: %w", err)
 	}
 	info, statErr := file.Stat()
 	if statErr != nil {
 		_ = file.Close()
-		return nil, 0, fmt.Errorf("inspect checksum manifest: %w", statErr)
+		return nil, 0, fmt.Errorf("inspect release artifact snapshot: %w", statErr)
 	}
 	if !info.Mode().IsRegular() {
 		_ = file.Close()
-		return nil, 0, errors.New("checksum manifest is not a regular file")
+		return nil, 0, errors.New("release artifact snapshot is not a regular file")
 	}
 	manifest, readErr := io.ReadAll(file)
 	closeErr := file.Close()
 	if readErr != nil {
-		return nil, 0, fmt.Errorf("read checksum manifest: %w", readErr)
+		return nil, 0, fmt.Errorf("read release artifact snapshot: %w", readErr)
 	}
 	if closeErr != nil {
-		return nil, 0, fmt.Errorf("close checksum manifest: %w", closeErr)
+		return nil, 0, fmt.Errorf("close release artifact snapshot: %w", closeErr)
 	}
 	return manifest, info.Mode().Perm(), nil
 }
@@ -216,28 +216,28 @@ func readChecksums(manifest []byte) (map[string][]byte, error) {
 	return checksums, nil
 }
 
-func publishVerifiedChecksums(path string, manifest []byte, mode fs.FileMode) error {
-	snapshot, err := os.CreateTemp(filepath.Dir(path), ".verified-checksums-*")
+func publishVerifiedSnapshot(path string, contents []byte, mode fs.FileMode) error {
+	snapshot, err := os.CreateTemp(filepath.Dir(path), ".verified-artifact-*")
 	if err != nil {
-		return fmt.Errorf("create verified checksum snapshot: %w", err)
+		return fmt.Errorf("create verified artifact snapshot: %w", err)
 	}
 	defer func() {
 		_ = os.Remove(snapshot.Name())
 	}()
 	if err := snapshot.Chmod(mode); err != nil {
 		_ = snapshot.Close()
-		return fmt.Errorf("set verified checksum permissions: %w", err)
+		return fmt.Errorf("set verified artifact permissions: %w", err)
 	}
-	_, writeErr := snapshot.Write(manifest)
+	_, writeErr := snapshot.Write(contents)
 	closeErr := snapshot.Close()
 	if writeErr != nil {
-		return fmt.Errorf("write verified checksum snapshot: %w", writeErr)
+		return fmt.Errorf("write verified artifact snapshot: %w", writeErr)
 	}
 	if closeErr != nil {
-		return fmt.Errorf("close verified checksum snapshot: %w", closeErr)
+		return fmt.Errorf("close verified artifact snapshot: %w", closeErr)
 	}
 	if err := os.Rename(snapshot.Name(), path); err != nil {
-		return fmt.Errorf("publish verified checksum snapshot: %w", err)
+		return fmt.Errorf("publish verified artifact snapshot: %w", err)
 	}
 	return nil
 }
@@ -288,12 +288,33 @@ func verifyArtifact(name, path string, checksums map[string][]byte) error {
 	return nil
 }
 
-func verifySPDX(path string) error {
-	document, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read SBOM %q: %w", path, err)
-	}
+type verifiedArtifact struct {
+	name     string
+	path     string
+	contents []byte
+	mode     fs.FileMode
+}
 
+func verifyMetadataArtifact(name, path string, checksums map[string][]byte, validate func(string, []byte) error) (verifiedArtifact, error) {
+	expected, exists := checksums[name]
+	if !exists {
+		return verifiedArtifact{}, fmt.Errorf("checksum manifest has no entry for %q", name)
+	}
+	contents, mode, err := readArtifactSnapshot(path)
+	if err != nil {
+		return verifiedArtifact{}, fmt.Errorf("open release artifact %q: %w", name, err)
+	}
+	digest := sha256.Sum256(contents)
+	if !bytes.Equal(digest[:], expected) {
+		return verifiedArtifact{}, fmt.Errorf("SHA-256 checksum mismatch for %q", name)
+	}
+	if err := validate(path, contents); err != nil {
+		return verifiedArtifact{}, err
+	}
+	return verifiedArtifact{name: name, path: path, contents: contents, mode: mode}, nil
+}
+
+func verifySPDX(path string, document []byte) error {
 	var spdx struct {
 		Version  string            `json:"spdxVersion"`
 		Packages []json.RawMessage `json:"packages"`
@@ -307,12 +328,7 @@ func verifySPDX(path string) error {
 	return nil
 }
 
-func verifyRegistryManifest(path string) error {
-	document, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read Terraform Registry manifest %q: %w", path, err)
-	}
-
+func verifyRegistryManifest(path string, document []byte) error {
 	var manifest struct {
 		Version  int `json:"version"`
 		Metadata struct {

@@ -477,9 +477,139 @@ func TestSigningBindsVerifiedChecksumSnapshot(t *testing.T) {
 	if publishedInfo.Mode().Perm() != originalInfo.Mode().Perm() {
 		t.Fatalf("published checksum permissions = %o, want %o", publishedInfo.Mode().Perm(), originalInfo.Mode().Perm())
 	}
-	snapshots, err := filepath.Glob(filepath.Join(fixture.directory, ".verified-checksums-*"))
+	snapshots, err := filepath.Glob(filepath.Join(fixture.directory, ".verified-*"))
 	if err != nil || len(snapshots) != 0 {
 		t.Fatalf("temporary verified checksum snapshots were not cleaned up: %v, %v", snapshots, err)
+	}
+}
+
+func TestSigningRestoresValidatedMetadataSnapshots(t *testing.T) {
+	tests := []struct {
+		name      string
+		artifact  func(releaseFixture) string
+		malformed string
+	}{
+		{
+			name:      "Terraform Registry manifest",
+			artifact:  func(fixture releaseFixture) string { return fixture.registry },
+			malformed: `{"version":1,"metadata":{"protocol_versions":["not-a-protocol"]}}`,
+		},
+		{
+			name:      "SPDX SBOM",
+			artifact:  func(fixture releaseFixture) string { return fixture.archive + ".spdx.json" },
+			malformed: `{"spdxVersion":"SPDX-2.3","packages":[]}`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			fixture := newReleaseFixture(t)
+			path := test.artifact(fixture)
+			verified, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			originalInfo, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			malformed := filepath.Join(directory, "malformed-metadata")
+			writeFixtureFile(t, malformed, []byte(test.malformed))
+			record := filepath.Join(directory, "gpg-invocation")
+			gpg := filepath.Join(directory, "gpg")
+			writeFixtureFile(t, gpg, []byte("#!/bin/sh\n"+
+				"mv \"$MALFORMED_METADATA\" \"$PUBLISHED_METADATA\"\n"+
+				"cat > /dev/null\nprintf 'signed\\n' > \"$SIGNING_RECORD\"\n"))
+			if err := os.Chmod(gpg, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH"))
+			t.Setenv("MALFORMED_METADATA", malformed)
+			t.Setenv("PUBLISHED_METADATA", path)
+			t.Setenv("SIGNING_RECORD", record)
+
+			if err := run([]string{fixture.manifest, "--sign", "--batch", "--detach-sign", fixture.manifest}); err != nil {
+				t.Fatalf("could not sign verified release metadata: %v", err)
+			}
+			if _, err := os.Stat(record); err != nil {
+				t.Fatalf("verified release metadata did not reach GPG: %v", err)
+			}
+			published, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(published) != string(verified) {
+				t.Fatalf("published metadata differs from its verified structural/digest snapshot: %q", published)
+			}
+			publishedInfo, err := os.Stat(path)
+			if err != nil || publishedInfo.Mode().Perm() != originalInfo.Mode().Perm() {
+				t.Fatalf("published metadata permissions differ from their verified snapshot: %v", err)
+			}
+		})
+	}
+}
+
+func TestMetadataValidationUsesItsHashedSnapshot(t *testing.T) {
+	tests := []struct {
+		name      string
+		artifact  func(releaseFixture) (string, string)
+		malformed string
+		valid     string
+		validate  func(string, []byte) error
+		wantErr   string
+	}{
+		{
+			name: "Terraform Registry manifest",
+			artifact: func(fixture releaseFixture) (string, string) {
+				return "terraform-provider-openai_1.2.3_manifest.json", fixture.registry
+			},
+			malformed: `{"version":1,"metadata":{"protocol_versions":["not-a-protocol"]}}`,
+			valid:     `{"version":1,"metadata":{"protocol_versions":["6.0"]}}`,
+			validate:  verifyRegistryManifest,
+			wantErr:   "invalid protocol version",
+		},
+		{
+			name: "SPDX SBOM",
+			artifact: func(fixture releaseFixture) (string, string) {
+				return filepath.Base(fixture.archive) + ".spdx.json", fixture.archive + ".spdx.json"
+			},
+			malformed: `{"spdxVersion":"SPDX-2.3","packages":[]}`,
+			valid:     `{"spdxVersion":"SPDX-2.3","packages":[{"name":"provider"}]}`,
+			validate:  verifySPDX,
+			wantErr:   "has no version or packages",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			fixture := newReleaseFixture(t)
+			name, path := test.artifact(fixture)
+			writeFixtureFile(t, path, []byte(test.malformed))
+			fixture.writeChecksums(t)
+			manifest, err := os.ReadFile(fixture.manifest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			checksums, err := readChecksums(manifest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			replacement := filepath.Join(t.TempDir(), "structurally-valid-replacement")
+			writeFixtureFile(t, replacement, []byte(test.valid))
+
+			_, err = verifyMetadataArtifact(name, path, checksums, func(filename string, snapshot []byte) error {
+				if renameErr := os.Rename(replacement, path); renameErr != nil {
+					return renameErr
+				}
+				return test.validate(filename, snapshot)
+			})
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("structurally valid pathname replacement bypassed malformed hashed bytes: %v", err)
+			}
+		})
 	}
 }
 
