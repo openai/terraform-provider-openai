@@ -44,7 +44,7 @@ check-terraform:
 	fi
 
 test: check-terraform
-	go test -v -cover -timeout=120s -parallel=10 ./...
+	go test -v -cover -timeout=120s -parallel=10 ./... ./.github/actions/setup-terraform
 
 testacc: check-terraform
 	TF_ACC=1 go test -v -cover -timeout $(ACC_TEST_TIMEOUT) $(ACC_TEST_PACKAGES)
