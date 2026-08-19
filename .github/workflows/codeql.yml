@@ -27,13 +27,6 @@ jobs:
     name: CodeQL (${{ matrix.language }})
     runs-on: ubuntu-latest
 
-    # These settings are ignored by the Actions extractor. Supplying an
-    # explicit dependency command keeps Go's autobuilder from invoking the
-    # repository's broad `make` target, and test files are otherwise excluded.
-    env:
-      CODEQL_EXTRACTOR_GO_BUILD_COMMAND: "go mod download"
-      CODEQL_EXTRACTOR_GO_OPTION_EXTRACT_TESTS: "true"
-
     strategy:
       fail-fast: false
       matrix:
@@ -41,7 +34,7 @@ jobs:
           - language: actions
             build-mode: none
           - language: go
-            build-mode: autobuild
+            build-mode: manual
 
     steps:
       - name: Checkout repository
@@ -62,6 +55,12 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
+
+      - name: Build Go source for CodeQL
+        if: matrix.language == 'go'
+        run: |
+          go build -buildvcs=false -mod=readonly ./...
+          go test -buildvcs=false -mod=readonly -run '^$' ./...
 
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
