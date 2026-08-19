@@ -59,6 +59,7 @@ jobs:
       - name: Build Go source for CodeQL
         if: matrix.language == 'go'
         run: |
+          go clean -cache
           go build -buildvcs=false -mod=readonly ./...
           go test -buildvcs=false -mod=readonly -run '^$' ./...
           go test -buildvcs=false -mod=readonly -run '^$' ./.github/actions/setup-terraform
