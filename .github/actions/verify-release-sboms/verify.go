@@ -31,25 +31,39 @@ func run(args []string) error {
 		return errors.New("signing target does not match verified checksum manifest")
 	}
 
-	if err := verifyRelease(args[0]); err != nil {
+	manifest, mode, err := readChecksumSnapshot(args[0])
+	if err != nil {
+		return err
+	}
+	if err := verifyReleaseSnapshot(args[0], manifest); err != nil {
 		return err
 	}
 	if len(args) == 1 {
 		return nil
 	}
 
-	sign := exec.Command("gpg", args[2:]...)
-	sign.Stdin = os.Stdin
+	signingArguments := append([]string(nil), args[2:]...)
+	signingArguments[len(signingArguments)-1] = "-"
+	sign := exec.Command("gpg", signingArguments...)
+	sign.Stdin = bytes.NewReader(manifest)
 	sign.Stdout = os.Stdout
 	sign.Stderr = os.Stderr
 	if err := sign.Run(); err != nil {
 		return fmt.Errorf("sign verified checksum manifest: %w", err)
 	}
-	return nil
+	return publishVerifiedChecksums(args[0], manifest, mode)
 }
 
 func verifyRelease(checksumPath string) error {
-	checksums, err := readChecksums(checksumPath)
+	manifest, _, err := readChecksumSnapshot(checksumPath)
+	if err != nil {
+		return err
+	}
+	return verifyReleaseSnapshot(checksumPath, manifest)
+}
+
+func verifyReleaseSnapshot(checksumPath string, manifest []byte) error {
+	checksums, err := readChecksums(manifest)
 	if err != nil {
 		return err
 	}
@@ -96,6 +110,10 @@ func verifyRelease(checksumPath string) error {
 	if !valid || releaseName == "" {
 		return fmt.Errorf("checksum manifest %q has no release identity", filepath.Base(checksumPath))
 	}
+	version, valid := strings.CutPrefix(releaseName, "terraform-provider-openai_")
+	if !valid || version == "" {
+		return fmt.Errorf("checksum manifest %q has an unsupported provider release identity", filepath.Base(checksumPath))
+	}
 	registryName := releaseName + "_manifest.json"
 	registryPath := filepath.Join(filepath.Dir(filepath.Dir(checksumPath)), "terraform-registry-manifest.json")
 	if err := verifyArtifact(registryName, registryPath, checksums); err != nil {
@@ -106,6 +124,9 @@ func verifyRelease(checksumPath string) error {
 	}
 
 	for name, path := range archives {
+		if err := verifyReleasePlatform(name, releaseName); err != nil {
+			return err
+		}
 		sbomName := name + ".spdx.json"
 		sbomPath, exists := sboms[sbomName]
 		if !exists || sbomPath != path+".spdx.json" {
@@ -140,12 +161,32 @@ func verifyRelease(checksumPath string) error {
 	return nil
 }
 
-func readChecksums(path string) (map[string][]byte, error) {
-	manifest, err := os.ReadFile(path)
+func readChecksumSnapshot(path string) ([]byte, fs.FileMode, error) {
+	file, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("read checksum manifest: %w", err)
+		return nil, 0, fmt.Errorf("read checksum manifest: %w", err)
 	}
+	info, statErr := file.Stat()
+	if statErr != nil {
+		_ = file.Close()
+		return nil, 0, fmt.Errorf("inspect checksum manifest: %w", statErr)
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, 0, errors.New("checksum manifest is not a regular file")
+	}
+	manifest, readErr := io.ReadAll(file)
+	closeErr := file.Close()
+	if readErr != nil {
+		return nil, 0, fmt.Errorf("read checksum manifest: %w", readErr)
+	}
+	if closeErr != nil {
+		return nil, 0, fmt.Errorf("close checksum manifest: %w", closeErr)
+	}
+	return manifest, info.Mode().Perm(), nil
+}
 
+func readChecksums(manifest []byte) (map[string][]byte, error) {
 	checksums := make(map[string][]byte)
 	scanner := bufio.NewScanner(bytes.NewReader(manifest))
 	for scanner.Scan() {
@@ -173,6 +214,52 @@ func readChecksums(path string) (map[string][]byte, error) {
 		return nil, fmt.Errorf("read checksum manifest: %w", err)
 	}
 	return checksums, nil
+}
+
+func publishVerifiedChecksums(path string, manifest []byte, mode fs.FileMode) error {
+	snapshot, err := os.CreateTemp(filepath.Dir(path), ".verified-checksums-*")
+	if err != nil {
+		return fmt.Errorf("create verified checksum snapshot: %w", err)
+	}
+	defer func() {
+		_ = os.Remove(snapshot.Name())
+	}()
+	if err := snapshot.Chmod(mode); err != nil {
+		_ = snapshot.Close()
+		return fmt.Errorf("set verified checksum permissions: %w", err)
+	}
+	_, writeErr := snapshot.Write(manifest)
+	closeErr := snapshot.Close()
+	if writeErr != nil {
+		return fmt.Errorf("write verified checksum snapshot: %w", writeErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close verified checksum snapshot: %w", closeErr)
+	}
+	if err := os.Rename(snapshot.Name(), path); err != nil {
+		return fmt.Errorf("publish verified checksum snapshot: %w", err)
+	}
+	return nil
+}
+
+func verifyReleasePlatform(name, releaseName string) error {
+	archive, valid := strings.CutSuffix(name, ".zip")
+	if !valid {
+		return fmt.Errorf("archive %q is not a ZIP release artifact", name)
+	}
+	platform, valid := strings.CutPrefix(archive, releaseName+"_")
+	if !valid {
+		return fmt.Errorf("archive %q does not belong to release %q", name, releaseName)
+	}
+	switch platform {
+	case "darwin_amd64", "darwin_arm64",
+		"freebsd_386", "freebsd_amd64", "freebsd_arm", "freebsd_arm64",
+		"linux_386", "linux_amd64", "linux_arm", "linux_arm64",
+		"windows_386", "windows_amd64", "windows_arm64":
+		return nil
+	default:
+		return fmt.Errorf("archive %q has unsupported release platform %q", name, platform)
+	}
 }
 
 func verifyArtifact(name, path string, checksums map[string][]byte) error {

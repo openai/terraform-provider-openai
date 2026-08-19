@@ -28,6 +28,67 @@ func TestVerifyRelease(t *testing.T) {
 			},
 		},
 		{
+			name: "supported freebsd arm release platform",
+			mutate: func(t *testing.T, fixture releaseFixture) {
+				renameFixtureArchive(t, fixture, "terraform-provider-openai_1.2.3_freebsd_arm.zip")
+			},
+		},
+		{
+			name: "supported windows arm64 release platform",
+			mutate: func(t *testing.T, fixture releaseFixture) {
+				renameFixtureArchive(t, fixture, "terraform-provider-openai_1.2.3_windows_arm64.zip")
+			},
+		},
+		{
+			name: "archive belongs to another provider",
+			mutate: func(t *testing.T, fixture releaseFixture) {
+				renameFixtureArchive(t, fixture, "terraform-provider-foreign_1.2.3_linux_amd64.zip")
+			},
+			wantErr: "does not belong to release",
+		},
+		{
+			name: "archive belongs to another release version",
+			mutate: func(t *testing.T, fixture releaseFixture) {
+				renameFixtureArchive(t, fixture, "terraform-provider-openai_9.9.9_linux_amd64.zip")
+			},
+			wantErr: "does not belong to release",
+		},
+		{
+			name: "archive has unsupported operating system",
+			mutate: func(t *testing.T, fixture releaseFixture) {
+				renameFixtureArchive(t, fixture, "terraform-provider-openai_1.2.3_plan9_amd64.zip")
+			},
+			wantErr: "unsupported release platform",
+		},
+		{
+			name: "archive has unsupported architecture",
+			mutate: func(t *testing.T, fixture releaseFixture) {
+				renameFixtureArchive(t, fixture, "terraform-provider-openai_1.2.3_linux_riscv64.zip")
+			},
+			wantErr: "unsupported release platform",
+		},
+		{
+			name: "archive uses ignored windows arm platform",
+			mutate: func(t *testing.T, fixture releaseFixture) {
+				renameFixtureArchive(t, fixture, "terraform-provider-openai_1.2.3_windows_arm.zip")
+			},
+			wantErr: "unsupported release platform",
+		},
+		{
+			name: "archive uses ignored darwin 386 platform",
+			mutate: func(t *testing.T, fixture releaseFixture) {
+				renameFixtureArchive(t, fixture, "terraform-provider-openai_1.2.3_darwin_386.zip")
+			},
+			wantErr: "unsupported release platform",
+		},
+		{
+			name: "archive has malformed release platform",
+			mutate: func(t *testing.T, fixture releaseFixture) {
+				renameFixtureArchive(t, fixture, "terraform-provider-openai_1.2.3_linux_amd64_extra.zip")
+			},
+			wantErr: "unsupported release platform",
+		},
+		{
 			name: "mismatched archive digest",
 			mutate: func(t *testing.T, fixture releaseFixture) {
 				writeFixtureFile(t, fixture.archive, []byte("tampered provider archive"))
@@ -296,6 +357,19 @@ func TestVerifyReleaseRejectsChecksumWithoutReleaseIdentity(t *testing.T) {
 	}
 }
 
+func TestVerifyReleaseRejectsForeignChecksumProject(t *testing.T) {
+	t.Parallel()
+
+	fixture := newReleaseFixture(t)
+	foreign := filepath.Join(fixture.directory, "terraform-provider-foreign_1.2.3_SHA256SUMS")
+	if err := os.Rename(fixture.manifest, foreign); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyRelease(foreign); err == nil || !strings.Contains(err.Error(), "unsupported provider release identity") {
+		t.Fatalf("checksum manifest for another Terraform provider was accepted: %v", err)
+	}
+}
+
 func TestSigningRequiresVerifiedProductionArtifacts(t *testing.T) {
 	directory := t.TempDir()
 	record := filepath.Join(directory, "gpg-invocation")
@@ -344,9 +418,103 @@ func TestSigningRequiresVerifiedProductionArtifacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GPG was not invoked for valid production artifacts: %v", err)
 	}
-	want := "--batch\n--detach-sign\n" + valid.manifest + "\n"
+	want := "--batch\n--detach-sign\n-\n"
 	if string(got) != want {
 		t.Fatalf("GPG arguments = %q, want %q", got, want)
+	}
+}
+
+func TestSigningBindsVerifiedChecksumSnapshot(t *testing.T) {
+	directory := t.TempDir()
+	fixture := newReleaseFixture(t)
+	verified, err := os.ReadFile(fixture.manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalInfo, err := os.Stat(fixture.manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forged := strings.Replace(string(verified), fmt.Sprintf("%x", sha256.Sum256([]byte("provider archive"))), strings.Repeat("0", 64), 1)
+	forgedPath := filepath.Join(directory, "forged-checksums")
+	signedPath := filepath.Join(directory, "signed-checksums")
+	writeFixtureFile(t, forgedPath, []byte(forged))
+
+	gpg := filepath.Join(directory, "gpg")
+	writeFixtureFile(t, gpg, []byte("#!/bin/sh\n"+
+		"mv \"$FORGED_CHECKSUMS\" \"$PUBLISHED_CHECKSUMS\"\n"+
+		"for argument in \"$@\"; do target=\"$argument\"; done\n"+
+		"if [ \"$target\" = - ]; then cat > \"$SIGNED_CHECKSUMS\"; else cat \"$target\" > \"$SIGNED_CHECKSUMS\"; fi\n"))
+	if err := os.Chmod(gpg, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("FORGED_CHECKSUMS", forgedPath)
+	t.Setenv("PUBLISHED_CHECKSUMS", fixture.manifest)
+	t.Setenv("SIGNED_CHECKSUMS", signedPath)
+
+	if err := run([]string{fixture.manifest, "--sign", "--batch", "--detach-sign", fixture.manifest}); err != nil {
+		t.Fatalf("could not sign verified checksum manifest: %v", err)
+	}
+	signed, err := os.ReadFile(signedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(signed) != string(verified) {
+		t.Fatalf("GPG signed bytes other than the verified checksum snapshot: %q", signed)
+	}
+	published, err := os.ReadFile(fixture.manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(published) != string(verified) {
+		t.Fatalf("published checksum manifest differs from its verified signed snapshot: %q", published)
+	}
+	publishedInfo, err := os.Stat(fixture.manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if publishedInfo.Mode().Perm() != originalInfo.Mode().Perm() {
+		t.Fatalf("published checksum permissions = %o, want %o", publishedInfo.Mode().Perm(), originalInfo.Mode().Perm())
+	}
+	snapshots, err := filepath.Glob(filepath.Join(fixture.directory, ".verified-checksums-*"))
+	if err != nil || len(snapshots) != 0 {
+		t.Fatalf("temporary verified checksum snapshots were not cleaned up: %v, %v", snapshots, err)
+	}
+}
+
+func TestSigningRejectsUnsupportedReleaseArchives(t *testing.T) {
+	tests := []struct {
+		name    string
+		archive string
+	}{
+		{name: "another provider", archive: "terraform-provider-foreign_1.2.3_linux_amd64.zip"},
+		{name: "another release version", archive: "terraform-provider-openai_9.9.9_linux_amd64.zip"},
+		{name: "unsupported windows arm", archive: "terraform-provider-openai_1.2.3_windows_arm.zip"},
+		{name: "unsupported darwin 386", archive: "terraform-provider-openai_1.2.3_darwin_386.zip"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			record := filepath.Join(directory, "gpg-invocation")
+			gpg := filepath.Join(directory, "gpg")
+			writeFixtureFile(t, gpg, []byte("#!/bin/sh\nprintf 'signed\\n' > \"$SIGNING_RECORD\"\n"))
+			if err := os.Chmod(gpg, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH"))
+			t.Setenv("SIGNING_RECORD", record)
+
+			fixture := newReleaseFixture(t)
+			renameFixtureArchive(t, fixture, test.archive)
+			if err := run([]string{fixture.manifest, "--sign", "--batch", "--detach-sign", fixture.manifest}); err == nil {
+				t.Fatal("unsupported archive reached production signing")
+			}
+			if _, err := os.Stat(record); !os.IsNotExist(err) {
+				t.Fatalf("GPG signed an unsupported production archive: %v", err)
+			}
+		})
 	}
 }
 
@@ -514,6 +682,19 @@ func (fixture releaseFixture) writeChecksums(t *testing.T) {
 	fmt.Fprintf(&manifest, "%x  terraform-provider-openai_1.2.3_manifest.json\n",
 		sha256.Sum256(registry))
 	writeFixtureFile(t, fixture.manifest, []byte(manifest.String()))
+}
+
+func renameFixtureArchive(t *testing.T, fixture releaseFixture, name string) {
+	t.Helper()
+
+	replacement := filepath.Join(fixture.directory, name)
+	if err := os.Rename(fixture.archive, replacement); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(fixture.archive+".spdx.json", replacement+".spdx.json"); err != nil {
+		t.Fatal(err)
+	}
+	fixture.writeChecksums(t)
 }
 
 func removeManifestEntry(t *testing.T, fixture releaseFixture, name string) {
