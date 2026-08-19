@@ -71,10 +71,8 @@ checksum:
   algorithm: sha256
 signs:
   - artifacts: checksum
-    cmd: go
+    cmd: release-verifier
     args:
-      - run
-      - .github/actions/verify-release-sboms/verify.go
       - "${artifact}"
       - --sign
       # if you are using this in a GitHub action or some other automated pipeline, you

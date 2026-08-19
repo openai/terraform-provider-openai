@@ -36,12 +36,22 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-
       - name: Install authenticated release tools
         uses: ./.github/actions/setup-release-tools
 
       - name: Verify release dependencies
         uses: ./.github/actions/verify-release-dependencies
+
+      - name: Build trusted release verifier
+        run: |
+          GOCACHE="$(mktemp -d "$RUNNER_TEMP/release-go-build-cache.XXXXXX")"
+          export GOCACHE
+          echo "GOCACHE=$GOCACHE" >> "$GITHUB_ENV"
+          go build -trimpath -o "$RUNNER_TEMP/release-verifier" .github/actions/verify-release-sboms/verify.go
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+        env:
+          GONOPROXY: "none"
+          GOPROXY: "off"
 
       - name: Check publish environment secrets
         env:

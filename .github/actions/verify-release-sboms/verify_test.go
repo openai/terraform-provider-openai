@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -225,9 +226,9 @@ func TestProductionReleaseUsesVerifiedSigner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signer := regexp.MustCompile(`(?m)^signs:\n  - artifacts: checksum\n    cmd: go\n    args:\n      - run\n      - \.github/actions/verify-release-sboms/verify\.go\n      - "\$\{artifact\}"\n      - --sign\n`)
+	signer := regexp.MustCompile(`(?m)^signs:\n  - artifacts: checksum\n    cmd: release-verifier\n    args:\n      - "\$\{artifact\}"\n      - --sign\n`)
 	if !signer.Match(configuration) {
-		t.Fatal("GoReleaser production checksum signing does not verify its exact artifact manifest")
+		t.Fatal("GoReleaser production checksum signing does not use the trusted prebuilt verifier")
 	}
 
 	workflow, err := os.ReadFile(filepath.Join(repository, ".github", "workflows", "release.yml"))
@@ -237,6 +238,89 @@ func TestProductionReleaseUsesVerifiedSigner(t *testing.T) {
 	publish := regexp.MustCompile(`(?ms)^  goreleaser:\n.*?^    environment: publish\n.*?^          args: release --clean\n`)
 	if !publish.Match(workflow) {
 		t.Fatal("approved production publishing job does not execute the verified GoReleaser release")
+	}
+}
+
+func TestProductionSigningDoesNotRestoreSharedGoCache(t *testing.T) {
+	t.Parallel()
+
+	workflow, err := os.ReadFile(filepath.Join("..", "..", "..", ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	publishStart := strings.Index(string(workflow), "\n  goreleaser:\n")
+	if publishStart < 0 {
+		t.Fatal("production publishing job was not found")
+	}
+	publish := string(workflow[publishStart:])
+
+	setup := regexp.MustCompile(`(?m)^      - uses: actions/setup-go@[^\n]+\n        with:\n          go-version-file: go\.mod\n          cache: false\n`)
+	setupLocation := setup.FindStringIndex(publish)
+	if setupLocation == nil {
+		t.Fatal("production publishing job restores a shared Go build cache")
+	}
+
+	build := strings.Index(publish, "      - name: Build trusted release verifier\n")
+	secrets := strings.Index(publish, "      - name: Check publish environment secrets\n")
+	importKey := strings.Index(publish, "      - name: Import GPG key\n")
+	release := strings.Index(publish, "      - name: Run GoReleaser\n")
+	if build < 0 || secrets < 0 || importKey < 0 || release < 0 || setupLocation[0] >= build || build >= secrets || secrets >= importKey || importKey >= release {
+		t.Fatal("trusted release verifier is not built before signing secrets are exposed")
+	}
+	trustedBuild := publish[build:secrets]
+
+	for _, command := range []string{
+		`GOCACHE="$(mktemp -d "$RUNNER_TEMP/release-go-build-cache.XXXXXX")"`,
+		`export GOCACHE`,
+		`echo "GOCACHE=$GOCACHE" >> "$GITHUB_ENV"`,
+		`go build -trimpath -o "$RUNNER_TEMP/release-verifier" .github/actions/verify-release-sboms/verify.go`,
+		`echo "$RUNNER_TEMP" >> "$GITHUB_PATH"`,
+	} {
+		if !strings.Contains(trustedBuild, command) {
+			t.Errorf("production publishing job does not enforce isolated signing prerequisite %q", command)
+		}
+	}
+}
+
+func TestPrebuiltSignerIgnoresHostileGoBuildCache(t *testing.T) {
+	t.Parallel()
+
+	directory := t.TempDir()
+	verifier := filepath.Join(directory, "release-verifier")
+	build := exec.Command("go", "build", "-trimpath", "-o", verifier, "verify.go")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build trusted release verifier before signing: %v\n%s", err, output)
+	}
+
+	signingRecord := filepath.Join(directory, "gpg-invocation")
+	goRecord := filepath.Join(directory, "hostile-go-invocation")
+	for name, source := range map[string]string{
+		"gpg": "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$SIGNING_RECORD\"\n",
+		"go":  "#!/bin/sh\nprintf 'hostile Go toolchain executed\\n' > \"$GO_INVOCATION_RECORD\"\nexit 90\n",
+	} {
+		path := filepath.Join(directory, name)
+		writeFixtureFile(t, path, []byte(source))
+		if err := os.Chmod(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	fixture := newReleaseFixture(t)
+	sign := exec.Command(verifier, fixture.manifest, "--sign", "--batch", "--detach-sign", fixture.manifest)
+	sign.Env = append(os.Environ(),
+		"PATH="+directory+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"GOCACHE="+filepath.Join(directory, "hostile-shared-cache"),
+		"SIGNING_RECORD="+signingRecord,
+		"GO_INVOCATION_RECORD="+goRecord,
+	)
+	if output, err := sign.CombinedOutput(); err != nil {
+		t.Fatalf("trusted verifier rejected valid production artifacts: %v\n%s", err, output)
+	}
+	if _, err := os.Stat(goRecord); !os.IsNotExist(err) {
+		t.Fatalf("production signer executed the hostile Go toolchain: %v", err)
+	}
+	if _, err := os.Stat(signingRecord); err != nil {
+		t.Fatalf("trusted verifier did not sign valid production artifacts: %v", err)
 	}
 }
 
