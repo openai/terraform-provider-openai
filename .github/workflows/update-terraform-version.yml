@@ -34,12 +34,13 @@ jobs:
 
       - name: Check latest stable Terraform version
         id: terraform-version
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
 
           latest_version="$(
-            curl --fail --silent --show-error --location \
-              https://api.github.com/repos/hashicorp/terraform/releases/latest |
+            gh api repos/hashicorp/terraform/releases/latest |
               jq --exit-status --raw-output \
                 '.tag_name | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")) | ltrimstr("v")'
           )"
@@ -79,8 +80,9 @@ jobs:
 
           branch="automation/update-terraform-version"
           pull_request="$(
-            gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --state open \
-              --json number --jq '.[0].number // empty'
+            gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --base main --state open \
+              --json number,isCrossRepository \
+              --jq 'map(select(.isCrossRepository == false)) | .[0].number // empty'
           )"
 
           if [[ "$CHANGED" != "true" ]]; then

@@ -1,0 +1,21 @@
+name: Set up verified Terraform
+description: Install the exactly pinned Terraform release after verifying its signed checksum.
+
+runs:
+  using: composite
+  steps:
+    - name: Install verified Terraform
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        version="$(cat .terraform-version)"
+        if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "Invalid pinned Terraform version: $version" >&2
+          exit 1
+        fi
+
+        install_dir="$RUNNER_TEMP/terraform-$version"
+        mkdir -p "$install_dir"
+        go run "$GITHUB_ACTION_PATH/install.go" "$version" "$install_dir"
+        echo "$install_dir" >> "$GITHUB_PATH"
