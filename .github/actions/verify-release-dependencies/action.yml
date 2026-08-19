@@ -9,7 +9,7 @@ runs:
       env:
         RELEASE_DEPENDENCY_ACTION_PATH: ${{ github.action_path }}
       run: |
-        source "$RELEASE_DEPENDENCY_ACTION_PATH/trusted-go-environment.sh"
+        source "$RELEASE_DEPENDENCY_ACTION_PATH/trusted-release-environment.sh"
 
         GOMODCACHE="$(mktemp -d "${RUNNER_TEMP}/verified-release-go-modules.XXXXXXXX")"
         GOCACHE="$(mktemp -d "${RUNNER_TEMP}/verified-release-go-build.XXXXXXXX")"

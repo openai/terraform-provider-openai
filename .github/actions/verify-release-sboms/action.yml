@@ -20,9 +20,9 @@ runs:
     - name: Verify release dependencies
       uses: ./.github/actions/verify-release-dependencies
 
-    - name: Verify trusted Go execution environment
+    - name: Verify trusted release execution environment
       shell: bash
-      run: python3 .github/actions/verify-release-dependencies/verify-go-environment.py
+      run: python3 .github/actions/verify-release-dependencies/verify-release-environment.py
       env:
         GONOPROXY: "none"
         GOPROXY: "off"
