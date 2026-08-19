@@ -6,7 +6,11 @@ runs:
   steps:
     - name: Verify committed Go modules
       shell: bash
+      env:
+        RELEASE_DEPENDENCY_ACTION_PATH: ${{ github.action_path }}
       run: |
+        source "$RELEASE_DEPENDENCY_ACTION_PATH/trusted-go-environment.sh"
+
         GOMODCACHE="$(mktemp -d "${RUNNER_TEMP}/verified-release-go-modules.XXXXXXXX")"
         GOCACHE="$(mktemp -d "${RUNNER_TEMP}/verified-release-go-build.XXXXXXXX")"
         export GOMODCACHE GOCACHE

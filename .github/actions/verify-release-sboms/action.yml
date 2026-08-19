@@ -20,6 +20,13 @@ runs:
     - name: Verify release dependencies
       uses: ./.github/actions/verify-release-dependencies
 
+    - name: Verify trusted Go execution environment
+      shell: bash
+      run: python3 .github/actions/verify-release-dependencies/verify-go-environment.py
+      env:
+        GONOPROXY: "none"
+        GOPROXY: "off"
+
     - name: Build release snapshot and SBOMs
       shell: bash
       run: python3 .github/actions/verify-release-sboms/verify-syft-boundary.py
