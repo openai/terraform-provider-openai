@@ -1,10 +1,12 @@
 package main
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,6 +16,65 @@ import (
 
 	"github.com/hashicorp/go-version"
 )
+
+func TestPinnedReleaseProxyRequestsUncompressedMetadata(t *testing.T) {
+	t.Parallel()
+
+	metadata := terraformReleaseMetadata("1.15.8")
+	encodings := make(chan string, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		encoding := request.Header.Get("Accept-Encoding")
+		encodings <- encoding
+		writer.Header().Set("Content-Type", "application/json")
+		if strings.Contains(encoding, "gzip") {
+			writer.Header().Set("Content-Encoding", "gzip")
+			compressed := gzip.NewWriter(writer)
+			if err := json.NewEncoder(compressed).Encode(metadata); err != nil {
+				t.Errorf("encode compressed release metadata: %v", err)
+			}
+			if err := compressed.Close(); err != nil {
+				t.Errorf("close compressed release metadata: %v", err)
+			}
+			return
+		}
+		if err := json.NewEncoder(writer).Encode(metadata); err != nil {
+			t.Errorf("encode release metadata: %v", err)
+		}
+	}))
+	defer upstream.Close()
+
+	upstreamURL, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatalf("parse release upstream URL: %v", err)
+	}
+	proxy := httptest.NewServer(pinnedReleaseProxy("1.15.8", upstreamURL))
+	defer proxy.Close()
+
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+		proxy.URL+"/terraform/1.15.8/index.json", nil)
+	if err != nil {
+		t.Fatalf("create compressed metadata request: %v", err)
+	}
+	request.Header.Set("Accept-Encoding", "gzip")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("request release metadata: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("compressed release metadata returned HTTP %d", response.StatusCode)
+	}
+	if encoding := <-encodings; encoding != "identity" {
+		t.Fatalf("upstream Accept-Encoding = %q, want identity", encoding)
+	}
+	var got releaseMetadata
+	if err := json.NewDecoder(response.Body).Decode(&got); err != nil {
+		t.Fatalf("decode proxied release metadata: %v", err)
+	}
+	if got.Version != "1.15.8" {
+		t.Fatalf("proxied release version = %q, want 1.15.8", got.Version)
+	}
+}
 
 func TestInstallTerraformRejectsSubstitutedReleaseMetadata(t *testing.T) {
 	t.Parallel()

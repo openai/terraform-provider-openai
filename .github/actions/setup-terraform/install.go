@@ -84,6 +84,7 @@ func pinnedReleaseProxy(want string, upstream *url.URL) http.Handler {
 	proxy.Director = func(request *http.Request) {
 		director(request)
 		request.Host = upstream.Host
+		request.Header.Set("Accept-Encoding", "identity")
 	}
 	proxy.ModifyResponse = func(response *http.Response) error {
 		if response.StatusCode >= http.StatusMultipleChoices && response.StatusCode < http.StatusBadRequest {

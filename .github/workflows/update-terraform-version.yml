@@ -40,10 +40,16 @@ jobs:
           set -euo pipefail
 
           latest_version="$(
-            gh api repos/hashicorp/terraform/releases/latest |
-              jq --exit-status --raw-output \
-                '.tag_name | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")) | ltrimstr("v")'
+            gh api 'repos/hashicorp/terraform/releases?per_page=100' --paginate \
+              --jq '.[] | select(.draft != true and .prerelease != true and (.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))) | .tag_name | ltrimstr("v")' |
+              sort -V |
+              tail -n 1
           )"
+          if [[ ! "$latest_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "No stable Terraform release found." >&2
+            exit 1
+          fi
+
           current_version="$(cat .terraform-version)"
 
           if [[ ! "$current_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
