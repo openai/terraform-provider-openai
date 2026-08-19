@@ -21,6 +21,13 @@ func TestVerifyRelease(t *testing.T) {
 	}{
 		{name: "valid archives, SPDX documents, and checksums"},
 		{
+			name: "multiple supported Terraform Registry protocol versions",
+			mutate: func(t *testing.T, fixture releaseFixture) {
+				writeFixtureFile(t, fixture.registry, []byte(`{"version":1,"metadata":{"protocol_versions":["5.0","6.0"]}}`))
+				fixture.writeChecksums(t)
+			},
+		},
+		{
 			name: "mismatched archive digest",
 			mutate: func(t *testing.T, fixture releaseFixture) {
 				writeFixtureFile(t, fixture.archive, []byte("tampered provider archive"))
@@ -33,6 +40,108 @@ func TestVerifyRelease(t *testing.T) {
 				writeFixtureFile(t, fixture.archive+".spdx.json", []byte(`{"spdxVersion":"SPDX-2.3","packages":[{"name":"tampered"}]}`))
 			},
 			wantErr: "SHA-256 checksum mismatch",
+		},
+		{
+			name: "tampered Terraform Registry manifest source",
+			mutate: func(t *testing.T, fixture releaseFixture) {
+				writeFixtureFile(t, fixture.registry, []byte(`{"version":1,"metadata":{"protocol_versions":["5.0"]}}`))
+			},
+			wantErr: "SHA-256 checksum mismatch",
+		},
+		{
+			name: "mismatched Terraform Registry manifest digest",
+			mutate: func(t *testing.T, fixture releaseFixture) {
+				name := "terraform-provider-openai_1.2.3_manifest.json"
+				removeManifestEntry(t, fixture, name)
+				appendManifestEntry(t, fixture, name, []byte("tampered registry manifest"))
+			},
+			wantErr: "SHA-256 checksum mismatch",
+		},
+		{
+			name: "missing Terraform Registry manifest entry",
+			mutate: func(t *testing.T, fixture releaseFixture) {
+				removeManifestEntry(t, fixture, "terraform-provider-openai_1.2.3_manifest.json")
+			},
+			wantErr: "checksum manifest has no entry",
+		},
+		{
+			name: "wrong Terraform Registry manifest release identity",
+			mutate: func(t *testing.T, fixture releaseFixture) {
+				removeManifestEntry(t, fixture, "terraform-provider-openai_1.2.3_manifest.json")
+				appendManifestEntry(t, fixture, "terraform-provider-openai_9.9.9_manifest.json", []byte("different release"))
+			},
+			wantErr: "checksum manifest has no entry",
+		},
+		{
+			name: "extra Terraform Registry manifest entry",
+			mutate: func(t *testing.T, fixture releaseFixture) {
+				appendManifestEntry(t, fixture, "terraform-provider-openai_9.9.9_manifest.json", []byte("different release"))
+			},
+			wantErr: "unexpected checksum manifest entry",
+		},
+		{
+			name: "missing Terraform Registry manifest source",
+			mutate: func(t *testing.T, fixture releaseFixture) {
+				if err := os.Remove(fixture.registry); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantErr: "open release artifact",
+		},
+		{
+			name: "malformed Terraform Registry manifest JSON",
+			mutate: func(t *testing.T, fixture releaseFixture) {
+				writeFixtureFile(t, fixture.registry, []byte(`{"version":`))
+				fixture.writeChecksums(t)
+			},
+			wantErr: "parse Terraform Registry manifest",
+		},
+		{
+			name: "unsupported Terraform Registry manifest version",
+			mutate: func(t *testing.T, fixture releaseFixture) {
+				writeFixtureFile(t, fixture.registry, []byte(`{"version":2,"metadata":{"protocol_versions":["6.0"]}}`))
+				fixture.writeChecksums(t)
+			},
+			wantErr: "unsupported version",
+		},
+		{
+			name: "missing Terraform Registry protocol versions",
+			mutate: func(t *testing.T, fixture releaseFixture) {
+				writeFixtureFile(t, fixture.registry, []byte(`{"version":1,"metadata":{"protocol_versions":[]}}`))
+				fixture.writeChecksums(t)
+			},
+			wantErr: "has no protocol versions",
+		},
+		{
+			name: "empty Terraform Registry protocol version",
+			mutate: func(t *testing.T, fixture releaseFixture) {
+				writeFixtureFile(t, fixture.registry, []byte(`{"version":1,"metadata":{"protocol_versions":[""]}}`))
+				fixture.writeChecksums(t)
+			},
+			wantErr: "invalid protocol version",
+		},
+		{
+			name: "malformed Terraform Registry protocol version",
+			mutate: func(t *testing.T, fixture releaseFixture) {
+				writeFixtureFile(t, fixture.registry, []byte(`{"version":1,"metadata":{"protocol_versions":["6.x"]}}`))
+				fixture.writeChecksums(t)
+			},
+			wantErr: "invalid protocol version",
+		},
+		{
+			name: "duplicate Terraform Registry protocol version",
+			mutate: func(t *testing.T, fixture releaseFixture) {
+				writeFixtureFile(t, fixture.registry, []byte(`{"version":1,"metadata":{"protocol_versions":["6.0","6.0"]}}`))
+				fixture.writeChecksums(t)
+			},
+			wantErr: "duplicate protocol version",
+		},
+		{
+			name: "unexpected checksum manifest entry",
+			mutate: func(t *testing.T, fixture releaseFixture) {
+				appendManifestEntry(t, fixture, "unexpected.json", []byte("unverified metadata"))
+			},
+			wantErr: "unexpected checksum manifest entry",
 		},
 		{
 			name: "missing archive manifest entry",
@@ -174,6 +283,19 @@ func TestVerifyRelease(t *testing.T) {
 	}
 }
 
+func TestVerifyReleaseRejectsChecksumWithoutReleaseIdentity(t *testing.T) {
+	t.Parallel()
+
+	fixture := newReleaseFixture(t)
+	unexpected := filepath.Join(fixture.directory, "checksums.txt")
+	if err := os.Rename(fixture.manifest, unexpected); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyRelease(unexpected); err == nil || !strings.Contains(err.Error(), "has no release identity") {
+		t.Fatalf("checksum manifest without a release identity was accepted: %v", err)
+	}
+}
+
 func TestSigningRequiresVerifiedProductionArtifacts(t *testing.T) {
 	directory := t.TempDir()
 	record := filepath.Join(directory, "gpg-invocation")
@@ -202,6 +324,16 @@ func TestSigningRequiresVerifiedProductionArtifacts(t *testing.T) {
 	}
 	if _, err := os.Stat(record); !os.IsNotExist(err) {
 		t.Fatalf("GPG was invoked for unverified production artifacts: %v", err)
+	}
+
+	invalidRegistry := newReleaseFixture(t)
+	writeFixtureFile(t, invalidRegistry.registry, []byte(`{"version":1,"metadata":{"protocol_versions":["5.0"]}}`))
+	if err := run([]string{invalidRegistry.manifest, "--sign", "--batch", "--detach-sign", invalidRegistry.manifest}); err == nil ||
+		!strings.Contains(err.Error(), "SHA-256 checksum mismatch") {
+		t.Fatalf("tampered Terraform Registry metadata reached signing: %v", err)
+	}
+	if _, err := os.Stat(record); !os.IsNotExist(err) {
+		t.Fatalf("GPG was invoked for unverified Terraform Registry metadata: %v", err)
 	}
 
 	valid := newReleaseFixture(t)
@@ -328,18 +460,25 @@ type releaseFixture struct {
 	directory string
 	archive   string
 	manifest  string
+	registry  string
 }
 
 func newReleaseFixture(t *testing.T) releaseFixture {
 	t.Helper()
 
-	directory := t.TempDir()
+	root := t.TempDir()
+	directory := filepath.Join(root, "dist")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	archive := filepath.Join(directory, "terraform-provider-openai_1.2.3_linux_amd64.zip")
 	fixture := releaseFixture{
 		directory: directory,
 		archive:   archive,
 		manifest:  filepath.Join(directory, "terraform-provider-openai_1.2.3_SHA256SUMS"),
+		registry:  filepath.Join(root, "terraform-registry-manifest.json"),
 	}
+	writeFixtureFile(t, fixture.registry, []byte(`{"version":1,"metadata":{"protocol_versions":["6.0"]}}`))
 	writeFixtureFile(t, archive, []byte("provider archive"))
 	writeFixtureFile(t, archive+".spdx.json",
 		[]byte(`{"spdxVersion":"SPDX-2.3","packages":[{"name":"terraform-provider-openai"}]}`))
@@ -366,10 +505,14 @@ func (fixture releaseFixture) writeChecksums(t *testing.T) {
 		fmt.Fprintf(&manifest, "%x  %s\n", sha256.Sum256(contents), entry.Name())
 	}
 
-	// GoReleaser signs the renamed Terraform Registry metadata even when that
-	// metadata is not present as a file beside the generated release artifacts.
+	registry, err := os.ReadFile(fixture.registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// GoReleaser signs the renamed Terraform Registry metadata while its source
+	// remains in the repository root instead of beside the release artifacts.
 	fmt.Fprintf(&manifest, "%x  terraform-provider-openai_1.2.3_manifest.json\n",
-		sha256.Sum256([]byte(`{"version":1}`)))
+		sha256.Sum256(registry))
 	writeFixtureFile(t, fixture.manifest, []byte(manifest.String()))
 }
 

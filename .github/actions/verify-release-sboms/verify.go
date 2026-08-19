@@ -92,6 +92,19 @@ func verifyRelease(checksumPath string) error {
 		return fmt.Errorf("release has %d archives but %d SBOMs", len(archives), len(sboms))
 	}
 
+	releaseName, valid := strings.CutSuffix(filepath.Base(checksumPath), "_SHA256SUMS")
+	if !valid || releaseName == "" {
+		return fmt.Errorf("checksum manifest %q has no release identity", filepath.Base(checksumPath))
+	}
+	registryName := releaseName + "_manifest.json"
+	registryPath := filepath.Join(filepath.Dir(filepath.Dir(checksumPath)), "terraform-registry-manifest.json")
+	if err := verifyArtifact(registryName, registryPath, checksums); err != nil {
+		return err
+	}
+	if err := verifyRegistryManifest(registryPath); err != nil {
+		return err
+	}
+
 	for name, path := range archives {
 		sbomName := name + ".spdx.json"
 		sbomPath, exists := sboms[sbomName]
@@ -119,6 +132,9 @@ func verifyRelease(checksumPath string) error {
 			if _, exists := sboms[name]; !exists {
 				return fmt.Errorf("checksum manifest lists missing SBOM %q", name)
 			}
+		case name == registryName:
+		default:
+			return fmt.Errorf("unexpected checksum manifest entry %q", name)
 		}
 	}
 	return nil
@@ -200,6 +216,44 @@ func verifySPDX(path string) error {
 	}
 	if spdx.Version == "" || len(spdx.Packages) == 0 {
 		return fmt.Errorf("SPDX SBOM %q has no version or packages", path)
+	}
+	return nil
+}
+
+func verifyRegistryManifest(path string) error {
+	document, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read Terraform Registry manifest %q: %w", path, err)
+	}
+
+	var manifest struct {
+		Version  int `json:"version"`
+		Metadata struct {
+			ProtocolVersions []string `json:"protocol_versions"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(document, &manifest); err != nil {
+		return fmt.Errorf("parse Terraform Registry manifest %q: %w", path, err)
+	}
+	if manifest.Version != 1 {
+		return fmt.Errorf("terraform registry manifest %q has unsupported version %d", path, manifest.Version)
+	}
+	if len(manifest.Metadata.ProtocolVersions) == 0 {
+		return fmt.Errorf("terraform registry manifest %q has no protocol versions", path)
+	}
+
+	versions := make(map[string]struct{}, len(manifest.Metadata.ProtocolVersions))
+	for _, version := range manifest.Metadata.ProtocolVersions {
+		major, minor, valid := strings.Cut(version, ".")
+		if !valid || major == "" || minor == "" || strings.ContainsFunc(major+minor, func(character rune) bool {
+			return character < '0' || character > '9'
+		}) {
+			return fmt.Errorf("terraform registry manifest %q has invalid protocol version %q", path, version)
+		}
+		if _, exists := versions[version]; exists {
+			return fmt.Errorf("terraform registry manifest %q has duplicate protocol version %q", path, version)
+		}
+		versions[version] = struct{}{}
 	}
 	return nil
 }
