@@ -20,8 +20,11 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Set up Terraform
+        uses: ./.github/actions/setup-terraform
+
       - name: Check formatting
         run: test -z "$(gofmt -l .)"
 
       - name: Run tests
-        run: go test -v -cover -timeout=120s -parallel=10 ./...
+        run: make test

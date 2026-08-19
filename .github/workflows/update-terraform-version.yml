@@ -1,0 +1,128 @@
+name: Update Terraform Version
+
+on:
+  schedule:
+    - cron: "17 10 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: update-terraform-version
+
+jobs:
+  update-terraform-version:
+    runs-on: ubuntu-latest
+    environment: release
+
+    steps:
+      - name: Create SDK app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.OPENAI_SDKS_APP_CLIENT_ID }}
+          private-key: ${{ secrets.OPENAI_SDKS_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+
+      - name: Check latest stable Terraform version
+        id: terraform-version
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          latest_version="$(
+            gh api 'repos/hashicorp/terraform/releases?per_page=100' --paginate \
+              --jq '.[] | select(.draft != true and .prerelease != true and (.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))) | .tag_name | ltrimstr("v")' |
+              sort -V |
+              tail -n 1
+          )"
+          if [[ ! "$latest_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "No stable Terraform release found." >&2
+            exit 1
+          fi
+
+          current_version="$(cat .terraform-version)"
+
+          if [[ ! "$current_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid pinned Terraform version: $current_version" >&2
+            exit 1
+          fi
+
+          if [[ "$latest_version" == "$current_version" ]]; then
+            echo "Terraform $current_version is already current."
+            exit 0
+          fi
+
+          highest_version="$(printf '%s\n' "$current_version" "$latest_version" | sort -V | tail -n 1)"
+          if [[ "$highest_version" != "$latest_version" ]]; then
+            echo "Pinned Terraform $current_version is newer than the latest stable release $latest_version."
+            exit 0
+          fi
+
+          {
+            echo "changed=true"
+            echo "current_version=$current_version"
+            echo "latest_version=$latest_version"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Manage Terraform version pull request
+        env:
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          CHANGED: ${{ steps.terraform-version.outputs.changed }}
+          CURRENT_VERSION: ${{ steps.terraform-version.outputs.current_version }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          LATEST_VERSION: ${{ steps.terraform-version.outputs.latest_version }}
+        run: |
+          set -euo pipefail
+
+          branch="automation/update-terraform-version"
+          pull_request="$(
+            gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --base main --state open \
+              --json number,isCrossRepository \
+              --jq 'map(select(.isCrossRepository == false)) | .[0].number // empty'
+          )"
+
+          if [[ "$CHANGED" != "true" ]]; then
+            if [[ -n "$pull_request" ]]; then
+              gh pr close "$pull_request" --repo "$GITHUB_REPOSITORY" --delete-branch
+            fi
+            exit 0
+          fi
+
+          title="build: update Terraform to $LATEST_VERSION"
+          bot_login="${APP_SLUG}[bot]"
+          bot_id="$(gh api "/users/$bot_login" --jq .id)"
+
+          git config user.name "$bot_login"
+          git config user.email "$bot_id+$bot_login@users.noreply.github.com"
+          git switch --force-create "$branch"
+          printf '%s\n' "$LATEST_VERSION" > .terraform-version
+          git add .terraform-version
+          git commit --message "$title"
+          git push --force-with-lease origin "$branch"
+
+          body_file="$(mktemp)"
+          printf '%s\n' \
+            "Updates the pinned Terraform CLI from $CURRENT_VERSION to $LATEST_VERSION." \
+            "" \
+            "Release notes: https://github.com/hashicorp/terraform/releases/tag/v$LATEST_VERSION" \
+            "" \
+            "All Terraform CI jobs read their version from .terraform-version." \
+            > "$body_file"
+
+          if [[ -n "$pull_request" ]]; then
+            gh pr edit "$pull_request" --repo "$GITHUB_REPOSITORY" \
+              --title "$title" --body-file "$body_file"
+          else
+            gh pr create --repo "$GITHUB_REPOSITORY" --head "$branch" --base main \
+              --title "$title" --body-file "$body_file"
+          fi

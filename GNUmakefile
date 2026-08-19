@@ -8,6 +8,11 @@ ACC_TEST_RESOURCES_RE ?= ^TestAcc(Certificate|Group|GroupRole|GroupUser|Invite|O
 ACC_TEST_DATASOURCES_RE ?= ^TestAccDataSource
 ACC_TEST_SCENARIOS_RE ?= ^TestAccScenario_
 
+ifndef TF_ACC_TERRAFORM_VERSION
+TF_ACC_TERRAFORM_PATH ?= $(shell command -v terraform 2>/dev/null)
+endif
+export TF_ACC_TERRAFORM_PATH
+
 build:
 	go build -v ./...
 
@@ -18,26 +23,41 @@ lint:
 	golangci-lint run
 
 generate:
+	@command -v terraform >/dev/null 2>&1 || { \
+		echo "Terraform CLI not found; install Terraform before generating documentation."; \
+		exit 1; \
+	}
 	cd tools; go generate ./...
 
 fmt:
 	gofmt -s -w -e .
 
-test:
-	go test -v -cover -timeout=120s -parallel=10 ./...
+check-terraform:
+	@if [ -n "$$TF_ACC_TERRAFORM_PATH" ]; then \
+		test -x "$$TF_ACC_TERRAFORM_PATH" || { \
+			echo "Terraform CLI is not executable: $$TF_ACC_TERRAFORM_PATH"; \
+			exit 1; \
+		}; \
+	elif [ -z "$$TF_ACC_TERRAFORM_VERSION" ]; then \
+		echo "Terraform CLI not found; install Terraform or set TF_ACC_TERRAFORM_PATH or TF_ACC_TERRAFORM_VERSION."; \
+		exit 1; \
+	fi
 
-testacc:
+test: check-terraform
+	go test -v -cover -timeout=120s -parallel=10 ./... ./.github/actions/setup-terraform
+
+testacc: check-terraform
 	TF_ACC=1 go test -v -cover -timeout $(ACC_TEST_TIMEOUT) $(ACC_TEST_PACKAGES)
 
-testacc-resources:
+testacc-resources: check-terraform
 	TF_ACC=1 go test -v -cover -timeout $(ACC_TEST_TIMEOUT) -run '$(ACC_TEST_RESOURCES_RE)' $(ACC_TEST_CATEGORY_PACKAGES)
 
-testacc-datasources:
+testacc-datasources: check-terraform
 	TF_ACC=1 go test -v -cover -timeout $(ACC_TEST_TIMEOUT) -run '$(ACC_TEST_DATASOURCES_RE)' $(ACC_TEST_CATEGORY_PACKAGES)
 
 testacc-data-sources: testacc-datasources
 
-testacc-scenarios:
+testacc-scenarios: check-terraform
 	TF_ACC=1 go test -v -cover -timeout $(ACC_TEST_TIMEOUT) -run '$(ACC_TEST_SCENARIOS_RE)' $(ACC_TEST_SCENARIO_PACKAGES)
 
-.PHONY: fmt lint test testacc testacc-resources testacc-datasources testacc-data-sources testacc-scenarios build install generate
+.PHONY: check-terraform fmt lint test testacc testacc-resources testacc-datasources testacc-data-sources testacc-scenarios build install generate
