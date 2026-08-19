@@ -483,12 +483,17 @@ func TestSigningBindsVerifiedChecksumSnapshot(t *testing.T) {
 	}
 }
 
-func TestSigningRestoresValidatedMetadataSnapshots(t *testing.T) {
+func TestSigningRestoresValidatedArtifactSnapshots(t *testing.T) {
 	tests := []struct {
 		name      string
 		artifact  func(releaseFixture) string
 		malformed string
 	}{
+		{
+			name:      "provider ZIP archive",
+			artifact:  func(fixture releaseFixture) string { return fixture.archive },
+			malformed: "replaced provider binary archive",
+		},
 		{
 			name:      "Terraform Registry manifest",
 			artifact:  func(fixture releaseFixture) string { return fixture.registry },
@@ -514,37 +519,37 @@ func TestSigningRestoresValidatedMetadataSnapshots(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			malformed := filepath.Join(directory, "malformed-metadata")
+			malformed := filepath.Join(directory, "malformed-artifact")
 			writeFixtureFile(t, malformed, []byte(test.malformed))
 			record := filepath.Join(directory, "gpg-invocation")
 			gpg := filepath.Join(directory, "gpg")
 			writeFixtureFile(t, gpg, []byte("#!/bin/sh\n"+
-				"mv \"$MALFORMED_METADATA\" \"$PUBLISHED_METADATA\"\n"+
+				"mv \"$MALFORMED_ARTIFACT\" \"$PUBLISHED_ARTIFACT\"\n"+
 				"cat > /dev/null\nprintf 'signed\\n' > \"$SIGNING_RECORD\"\n"))
 			if err := os.Chmod(gpg, 0o755); err != nil {
 				t.Fatal(err)
 			}
 			t.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH"))
-			t.Setenv("MALFORMED_METADATA", malformed)
-			t.Setenv("PUBLISHED_METADATA", path)
+			t.Setenv("MALFORMED_ARTIFACT", malformed)
+			t.Setenv("PUBLISHED_ARTIFACT", path)
 			t.Setenv("SIGNING_RECORD", record)
 
 			if err := run([]string{fixture.manifest, "--sign", "--batch", "--detach-sign", fixture.manifest}); err != nil {
-				t.Fatalf("could not sign verified release metadata: %v", err)
+				t.Fatalf("could not sign verified release artifacts: %v", err)
 			}
 			if _, err := os.Stat(record); err != nil {
-				t.Fatalf("verified release metadata did not reach GPG: %v", err)
+				t.Fatalf("verified release artifacts did not reach GPG: %v", err)
 			}
 			published, err := os.ReadFile(path)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if string(published) != string(verified) {
-				t.Fatalf("published metadata differs from its verified structural/digest snapshot: %q", published)
+				t.Fatalf("published artifact differs from its verified digest snapshot: %q", published)
 			}
 			publishedInfo, err := os.Stat(path)
 			if err != nil || publishedInfo.Mode().Perm() != originalInfo.Mode().Perm() {
-				t.Fatalf("published metadata permissions differ from their verified snapshot: %v", err)
+				t.Fatalf("published artifact permissions differ from their verified snapshot: %v", err)
 			}
 		})
 	}

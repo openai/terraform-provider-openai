@@ -35,8 +35,8 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	var metadata []verifiedArtifact
-	if err := verifyReleaseSnapshot(args[0], manifest, &metadata); err != nil {
+	var artifacts []verifiedArtifact
+	if err := verifyReleaseSnapshot(args[0], manifest, &artifacts); err != nil {
 		return err
 	}
 	if len(args) == 1 {
@@ -52,9 +52,9 @@ func run(args []string) error {
 	if err := sign.Run(); err != nil {
 		return fmt.Errorf("sign verified checksum manifest: %w", err)
 	}
-	for _, artifact := range metadata {
+	for _, artifact := range artifacts {
 		if err := publishVerifiedSnapshot(artifact.path, artifact.contents, artifact.mode); err != nil {
-			return fmt.Errorf("publish verified release metadata %q: %w", artifact.name, err)
+			return fmt.Errorf("publish verified release artifact %q: %w", artifact.name, err)
 		}
 	}
 	return publishVerifiedSnapshot(args[0], manifest, mode)
@@ -64,7 +64,7 @@ func verifyRelease(checksumPath string) error {
 	return run([]string{checksumPath})
 }
 
-func verifyReleaseSnapshot(checksumPath string, manifest []byte, metadata *[]verifiedArtifact) error {
+func verifyReleaseSnapshot(checksumPath string, manifest []byte, artifacts *[]verifiedArtifact) error {
 	checksums, err := readChecksums(manifest)
 	if err != nil {
 		return err
@@ -122,7 +122,7 @@ func verifyReleaseSnapshot(checksumPath string, manifest []byte, metadata *[]ver
 	if err != nil {
 		return err
 	}
-	*metadata = append(*metadata, registry)
+	*artifacts = append(*artifacts, registry)
 
 	for name, path := range archives {
 		if err := verifyReleasePlatform(name, releaseName); err != nil {
@@ -133,14 +133,16 @@ func verifyReleaseSnapshot(checksumPath string, manifest []byte, metadata *[]ver
 		if !exists || sbomPath != path+".spdx.json" {
 			return fmt.Errorf("archive %q has no matching adjacent SBOM", name)
 		}
-		if err := verifyArtifact(name, path, checksums); err != nil {
+		archive, err := verifyArtifact(name, path, checksums)
+		if err != nil {
 			return err
 		}
+		*artifacts = append(*artifacts, archive)
 		sbom, err := verifyMetadataArtifact(sbomName, sbomPath, checksums, verifySPDX)
 		if err != nil {
 			return err
 		}
-		*metadata = append(*metadata, sbom)
+		*artifacts = append(*artifacts, sbom)
 	}
 
 	for name := range checksums {
@@ -262,32 +264,6 @@ func verifyReleasePlatform(name, releaseName string) error {
 	}
 }
 
-func verifyArtifact(name, path string, checksums map[string][]byte) error {
-	expected, exists := checksums[name]
-	if !exists {
-		return fmt.Errorf("checksum manifest has no entry for %q", name)
-	}
-
-	file, err := os.Open(path)
-	if err != nil {
-		return fmt.Errorf("open release artifact %q: %w", name, err)
-	}
-
-	hash := sha256.New()
-	_, hashErr := io.Copy(hash, file)
-	closeErr := file.Close()
-	if hashErr != nil {
-		return fmt.Errorf("hash release artifact %q: %w", name, hashErr)
-	}
-	if closeErr != nil {
-		return fmt.Errorf("close release artifact %q: %w", name, closeErr)
-	}
-	if !bytes.Equal(hash.Sum(nil), expected) {
-		return fmt.Errorf("SHA-256 checksum mismatch for %q", name)
-	}
-	return nil
-}
-
 type verifiedArtifact struct {
 	name     string
 	path     string
@@ -295,7 +271,7 @@ type verifiedArtifact struct {
 	mode     fs.FileMode
 }
 
-func verifyMetadataArtifact(name, path string, checksums map[string][]byte, validate func(string, []byte) error) (verifiedArtifact, error) {
+func verifyArtifact(name, path string, checksums map[string][]byte) (verifiedArtifact, error) {
 	expected, exists := checksums[name]
 	if !exists {
 		return verifiedArtifact{}, fmt.Errorf("checksum manifest has no entry for %q", name)
@@ -308,10 +284,18 @@ func verifyMetadataArtifact(name, path string, checksums map[string][]byte, vali
 	if !bytes.Equal(digest[:], expected) {
 		return verifiedArtifact{}, fmt.Errorf("SHA-256 checksum mismatch for %q", name)
 	}
-	if err := validate(path, contents); err != nil {
+	return verifiedArtifact{name: name, path: path, contents: contents, mode: mode}, nil
+}
+
+func verifyMetadataArtifact(name, path string, checksums map[string][]byte, validate func(string, []byte) error) (verifiedArtifact, error) {
+	artifact, err := verifyArtifact(name, path, checksums)
+	if err != nil {
 		return verifiedArtifact{}, err
 	}
-	return verifiedArtifact{name: name, path: path, contents: contents, mode: mode}, nil
+	if err := validate(path, artifact.contents); err != nil {
+		return verifiedArtifact{}, err
+	}
+	return artifact, nil
 }
 
 func verifySPDX(path string, document []byte) error {
