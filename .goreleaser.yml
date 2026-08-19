@@ -36,29 +36,19 @@ archives:
 sboms:
 - id: provider-archives
   artifacts: archive
+  cmd: ../.github/actions/verify-release-sboms/generate-sbom.sh
   args:
     - '$artifact'
-    - '--output'
-    - 'spdx-json=$document'
+    - '$document'
   env:
+    - 'RELEASE_TOOLS_DIR={{ .Env.RELEASE_TOOLS_DIR }}'
     - 'GOMODCACHE={{ .Env.GOMODCACHE }}'
     - 'GOCACHE={{ .Env.GOCACHE }}'
     - 'GOPROXY=off'
     - 'GONOPROXY=none'
-    - 'SYFT_CHECK_FOR_APP_UPDATE=false'
-    - 'SYFT_ENRICH='
-    - 'SYFT_CACHE_TTL=0'
     - 'SYFT_GOLANG_LOCAL_MOD_CACHE_DIR={{ .Env.GOMODCACHE }}'
-    - 'SYFT_GOLANG_SEARCH_LOCAL_MOD_CACHE_LICENSES=true'
-    - 'SYFT_GOLANG_SEARCH_LOCAL_VENDOR_LICENSES=false'
-    - 'SYFT_GOLANG_SEARCH_REMOTE_LICENSES=false'
     - 'SYFT_GOLANG_PROXY=file://{{ .Env.GOMODCACHE }}/cache/download'
     - 'SYFT_GOLANG_NO_PROXY=none'
-    - 'SYFT_GOLANG_USE_PACKAGES_LIB=false'
-    - 'SYFT_JAVA_USE_NETWORK=false'
-    - 'SYFT_JAVASCRIPT_SEARCH_REMOTE_LICENSES=false'
-    - 'SYFT_PYTHON_SEARCH_REMOTE_LICENSES=false'
-    - 'SYFT_CPP_VCPKG_ALLOW_GIT_CLONE=false'
     - 'SYFT_FILE_METADATA_CATALOGER_ENABLED=true'
   documents:
     - '${artifact}.spdx.json'

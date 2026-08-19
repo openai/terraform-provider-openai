@@ -93,6 +93,14 @@ def write_hostile_home(directory, proxy_url, version):
         "check-for-app-update: true\n"
         "enrich:\n"
         "  - all\n"
+        "from:\n"
+        "  - registry\n"
+        "select-catalogers:\n"
+        "  - '-go-module-binary-cataloger'\n"
+        "source:\n"
+        "  name: attacker-rebound-provider\n"
+        "  version: 999.999.999\n"
+        "  supplier: Attacker Controlled\n"
         "golang:\n"
         f"  local-mod-cache-dir: '{cache}'\n"
         f"  proxy: '{proxy_url}'\n"
@@ -109,16 +117,97 @@ def verify_sboms():
         raise SystemExit("release snapshot did not produce any SPDX SBOMs")
 
     for sbom in sboms:
-        packages = json.loads(sbom.read_text(encoding="utf-8"))["packages"]
-        package = next(
-            (entry for entry in packages if entry["name"] == MODULE), None
-        )
+        document = json.loads(sbom.read_text(encoding="utf-8"))
+        archive = sbom.name.removesuffix(".spdx.json")
+        if document.get("name") != archive:
+            raise SystemExit(
+                f"{sbom}: ambient configuration changed source identity to "
+                f"{document.get('name')!r}"
+            )
+
+        packages = document["packages"]
+        package = next((entry for entry in packages if entry["name"] == MODULE), None)
         if package is None:
             raise SystemExit(f"{sbom}: missing expected module {MODULE}")
         if package.get("licenseConcluded") != "Apache-2.0":
             raise SystemExit(
                 f"{sbom}: untrusted cache/proxy changed {MODULE} license to "
                 f"{package.get('licenseConcluded')!r}"
+            )
+
+
+def verify_invalid_sboms_rejected(directory, environment):
+    archive = next(Path("dist").glob("*.zip"))
+    fixture = archive.with_name(f"{archive.name}.spdx.json").resolve()
+    tools = directory / "invalid-sbom-tools"
+    tools.mkdir()
+
+    fake_syft = tools / "syft"
+    fake_syft.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        'previous=""\n'
+        'for argument in "$@"; do\n'
+        '  if [[ "$previous" == --output ]]; then\n'
+        '    jq "$SBOM_MUTATION" "$SBOM_FIXTURE" > "${argument#spdx-json=}"\n'
+        "    exit 0\n"
+        "  fi\n"
+        '  previous="$argument"\n'
+        "done\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    fake_syft.chmod(0o755)
+
+    mutations = {
+        "document identity": '.name = "attacker-rebound-provider"',
+        "source identity": (
+            '(.packages[] | select(.SPDXID | startswith("SPDXRef-DocumentRoot"))'
+            ' | .name) = "attacker-rebound-provider"'
+        ),
+        "source supplier": (
+            '(.packages[] | select(.SPDXID | startswith("SPDXRef-DocumentRoot"))'
+            ' | .supplier) = "Attacker Controlled"'
+        ),
+        "archive digest": (
+            '(.packages[] | select(.SPDXID | startswith("SPDXRef-DocumentRoot"))'
+            ' | .versionInfo) = "sha256:attacker-controlled"'
+        ),
+        "removed dependency": (
+            '.packages |= map(select(.name != "github.com/hashicorp/go-plugin"))'
+        ),
+        "forged dependency version": (
+            '(.packages[] | select(.name == "github.com/hashicorp/go-plugin")'
+            ' | .versionInfo) = "v999.999.999"'
+        ),
+        "forged SDK license": (
+            f'(.packages[] | select(.name == "{MODULE}") | .licenseConcluded) = "MIT"'
+        ),
+    }
+
+    for attack, mutation in mutations.items():
+        hostile_environment = environment.copy()
+        hostile_environment.update(
+            RELEASE_TOOLS_DIR=str(tools),
+            SBOM_FIXTURE=str(fixture),
+            SBOM_MUTATION=mutation,
+        )
+        result = subprocess.run(
+            [
+                ".github/actions/verify-release-sboms/generate-sbom.sh",
+                str(archive),
+                str(directory / "invalid.spdx.json"),
+            ],
+            env=hostile_environment,
+            text=True,
+            capture_output=True,
+        )
+        if result.returncode == 0:
+            raise SystemExit(f"pre-signing SBOM validation accepted {attack}")
+        if "SBOM failed archive identity" not in result.stderr:
+            raise SystemExit(
+                f"pre-signing SBOM validation did not diagnose {attack}: "
+                f"{result.stderr.strip()}"
             )
 
 
@@ -157,8 +246,12 @@ def main():
                     f"{HostileModuleProxy.requests[0]}"
                 )
             verify_sboms()
+            verify_invalid_sboms_rejected(hostile_home, environment)
 
-    print(f"Verified {MODULE} SBOM licenses without hostile-cache or proxy access.")
+    print(
+        f"Verified {MODULE} SBOM identities, complete dependencies, and licenses "
+        "without hostile configuration, cache, or proxy access."
+    )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,34 @@
+check-for-app-update: false
+enrich: []
+from: []
+default-catalogers: []
+select-catalogers: []
+
+source:
+  name: ""
+  version: ""
+  supplier: ""
+  file:
+    digests:
+      - SHA-256
+
+golang:
+  search-local-mod-cache-licenses: true
+  search-local-vendor-licenses: false
+  search-remote-licenses: false
+  use-packages-lib: false
+
+java:
+  use-network: false
+
+javascript:
+  search-remote-licenses: false
+
+python:
+  search-remote-licenses: false
+
+cpp:
+  vcpkg-allow-git-clone: false
+
+cache:
+  ttl: 0
