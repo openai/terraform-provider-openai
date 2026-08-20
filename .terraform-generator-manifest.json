@@ -1,10 +1,10 @@
 {
   "files": {
     ".copywrite.hcl": "0a82bb5c46a9350609674864acb590bdcef14031ffa02b3b2d772da015a72f0f",
-    ".github/workflows/ci.yml": "4686809ef0083cd658d08a6c768ad07c6a06ba747028106d76e051ae714aef30",
+    ".github/workflows/ci.yml": "d41947c7ce64a07d1d9365ea9ab8a3ccd1d7482a4f4c523a905dbd06b77a2117",
     ".gitignore": "f0883043c2f2146020cbbee6f578dcbf84175c9f7abb9be23780f802a9c26ef6",
     ".golangci.yml": "eedd431166ed43216006dc37f01c9e3f9282d4b339517ab0a68e946c8d3059d6",
-    "GNUmakefile": "aed52103deafe3eca3721d1b464ae7212c54a172697224d32c7edd16cf884c7d",
+    "GNUmakefile": "eb7ec1f45cd2839bc9528f5a5e6f4ac3854b530612070584bf43c2ea708e44f0",
     "docs/data-sources/certificate.md": "05cf4f778f2075c3801cbbc1037e4f88a289b392e9743c7ca98d01a3ce2c7729",
     "docs/data-sources/certificates.md": "67128efc3944e7204bfef9f722794179b66c612cc147a29fc34630187cec1a55",
     "docs/data-sources/group.md": "0d95497256cce2bc52e196f59b43a0a7afefdcc5d57df8058c301bd50d1bd76b",
@@ -159,13 +159,15 @@
     "examples/resources/openai_role/resource.tf": "8e9042d400f67bfef980be0fd9266cbeb16f8094ef47b5636f2e54727d4b468f",
     "examples/resources/openai_user_role/import-by-string-id.tf": "36180e2dc3029c7a89016965129b1d1537f6cc7547d08956e05c18a2bcb13f87",
     "examples/resources/openai_user_role/resource.tf": "3dc8b63c02eb1f651eb39dda9d45647ae4f8431d709f4327023de536cb603b3d",
-    "go.mod": "aff57e1abad47b7243a29958a6c10762134a2488f74213f12217b1dbe7abe215",
+    "go.mod": "430e56882498956c2479a16fd0531739f58ca2d0a3fa120e84636459d156b2a6",
     "go.sum": "fbf858b2b9243fe38720eb5e957093a671e78bbbf348e92ec6cc94a01de5f08d",
     "internal/provider/acctest/acceptance.go": "2fe0fa2b9ba52ef5065957fcdc7362980b592dab2915f8cc96a5915323721815",
     "internal/provider/acctest/scenario_acc_test.go": "b2dcbc0e2f1157a394d8b4a6e2f0fe3eaee2e2647e52278df788ef6d7fc9f657",
-    "internal/provider/openaiapi/client.go": "1c4aed4e720897e8248350b39cd2b08ea4fa820d8a3b6242c8a10b0786d89a34",
-    "internal/provider/openaiapi/client_test.go": "5c9a105012a825e83f7a1199f8b77624da176992605c2f844a027f9646bc3386",
-    "internal/provider/provider.go": "4b3ecf8e2268227705087ee3c781df40599d705f41edef6f7842b1702ee57221",
+    "internal/provider/openaiapi/client.go": "4ad7bba341445b77a11867b9a5c97591dd9138e026c6c326be8f1896a97e9c26",
+    "internal/provider/openaiapi/client_test.go": "cc4c45e9443c4e83cc908417de776ec9bbc51e682b51304ef19a66dc9370f536",
+    "internal/provider/provider.go": "636029f7a61acdf257ce6dc3ec396bf03e4b8b622f43a26355945bef7876a616",
+    "internal/provider/provider_security.go": "4cf807ec2628bc377682920046ad50b5e1c159c4e1cc54d6f077ab7a10e8fad9",
+    "internal/provider/provider_security_test.go": "8d8bfb688c2bddb1735ef3e928a6c50805b6bb743848fae79240c4331b5ee9a3",
     "internal/provider/provider_test.go": "3b47db09a56b6a059ceb58be97d1fc0a9c4ffb5ccd11dc38ddccd26b14105466",
     "internal/provider/resources/certificate/data_source_certificate.go": "b14fba17f6b9e9e90b27033801681cb2d94e3b3ec87fcb64fc8303cb0f1a4134",
     "internal/provider/resources/certificate/data_source_certificate_acc_test.go": "bceb3a0f8923b710a8b5e73273ea68d5df77b93d07187f9b8a50a89f3a2a6c2e",
@@ -238,6 +240,7 @@
     "internal/provider/resources/project_hosted_tool_permissions/data_source_project_hosted_tool_permissions.go": "4c2edb64ede861acd1fa24d1fabb08ccc977c85a706019bed7c220019eb9c31f",
     "internal/provider/resources/project_hosted_tool_permissions/data_source_project_hosted_tool_permissions_acc_test.go": "b49b377bbffc611dae36393f1f0c53a1853c65ab76a434ff008dd8bcf92fc1e5",
     "internal/provider/resources/project_hosted_tool_permissions/resource_project_hosted_tool_permissions.go": "d633a99903fae8996840341c24ff159632afe2af770e0286dc5918fe1bcebd42",
+    "internal/provider/resources/project_hosted_tool_permissions/resource_project_hosted_tool_permissions_test.go": "a998b23612559ae87182445f36275c971cca604eb8ebaf78bf90106a234810de",
     "internal/provider/resources/project_model_permissions/data_source_project_model_permissions.go": "079637d2b16f34323bce3b45c29a953b9919fd94b70bd4d8114a5e2be50fd46e",
     "internal/provider/resources/project_model_permissions/data_source_project_model_permissions_acc_test.go": "830fe4a743e8639fced64218f0f030402e19db35e699f33fb82f87cf4ec095bd",
     "internal/provider/resources/project_model_permissions/resource_project_model_permissions.go": "d81ff8a4b0c60a383c8c487e61e194cd49a365b37e4616031244360d70ac7b77",
@@ -287,7 +290,7 @@
     "main.go": "bbf7b87127a002ba12400fabede83dfcbfd9d376ab8db85c889f60645011bb2a",
     "templates/index.md.tmpl": "95ab116d95eace26b885217bbfdb35ad6426c4a8d23f2e44570d75b92afc6f05",
     "terraform-registry-manifest.json": "f809ab383cca0a5f83072981c64208cbd7fa67e986a86ee02dd2c82333221e32",
-    "tools/tools.go": "97cf694f9eaeb3aab1087fd08787f3f36d4cfbe127c9baf426d5365d4515b52e"
+    "tools/tools.go": "b5d5236b450351f9a86d9ec6904a9f5afe43c77de893c098d2361e8a07eab68e"
   },
   "version": 1
 }

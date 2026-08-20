@@ -8,6 +8,7 @@ require (
 	github.com/hashicorp/terraform-plugin-log v0.11.0
 	github.com/hashicorp/terraform-plugin-testing v1.16.0
 	github.com/openai/openai-go/v3 v3.51.0
+	golang.org/x/net v0.57.0
 )
 
 require (
@@ -55,7 +56,6 @@ require (
 	github.com/zclconf/go-cty v1.18.1 // indirect
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/mod v0.37.0 // indirect
-	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect

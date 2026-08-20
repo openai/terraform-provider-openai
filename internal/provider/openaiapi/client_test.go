@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -14,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -138,6 +140,363 @@ func TestRequestRejectsPathDotSegments(t *testing.T) {
 	}
 }
 
+type responseLimitTrackingBody struct {
+	io.Reader
+	closeErr error
+	closed   bool
+}
+
+func (b *responseLimitTrackingBody) Close() error {
+	b.closed = true
+	return b.closeErr
+}
+
+func TestReadResponseBodyEnforcesLimitsAndClosesBodies(t *testing.T) {
+	closeFailure := errors.New("response body close failed")
+	tests := []struct {
+		name          string
+		payload       string
+		contentLength int64
+		readErr       error
+		closeErr      error
+		wantRead      int
+		wantError     error
+		wantLimit     bool
+	}{
+		{
+			name:          "response exactly at limit",
+			payload:       "12345678",
+			contentLength: 8,
+			wantRead:      8,
+		},
+		{
+			name:          "declared response one byte above limit",
+			payload:       "123456789",
+			contentLength: 9,
+			wantLimit:     true,
+		},
+		{
+			name:          "chunked response one byte above limit",
+			payload:       "1234567890",
+			contentLength: -1,
+			wantRead:      9,
+			wantLimit:     true,
+		},
+		{
+			name:          "understated content length cannot bypass limit",
+			payload:       "1234567890",
+			contentLength: 8,
+			wantRead:      9,
+			wantLimit:     true,
+		},
+		{
+			name:          "oversized content length rejects before reading",
+			payload:       "secret-response-value",
+			contentLength: 4096,
+			wantLimit:     true,
+		},
+		{
+			name:          "canceled response body preserves cancellation",
+			contentLength: -1,
+			readErr:       context.Canceled,
+			wantError:     context.Canceled,
+		},
+		{
+			name:          "response body close failure is preserved",
+			payload:       "12345678",
+			contentLength: 8,
+			closeErr:      closeFailure,
+			wantRead:      8,
+			wantError:     closeFailure,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			reader := strings.NewReader(test.payload)
+			var bodyReader io.Reader = reader
+			if test.readErr != nil {
+				bodyReader = iotest.ErrReader(test.readErr)
+			}
+			trackedBody := &responseLimitTrackingBody{
+				Reader:   bodyReader,
+				closeErr: test.closeErr,
+			}
+			response := &http.Response{
+				StatusCode:    http.StatusOK,
+				ContentLength: test.contentLength,
+				Body:          trackedBody,
+			}
+			client := &APIClient{maxResponseBytes: 8}
+			body, err := client.readResponseBody(context.Background(), response)
+			if !trackedBody.closed {
+				t.Fatal("response body was not closed")
+			}
+			if bytesRead := len(test.payload) - reader.Len(); bytesRead != test.wantRead {
+				t.Fatalf("read %d bytes, want %d", bytesRead, test.wantRead)
+			}
+			if test.wantLimit {
+				var limitErr *responseBodyLimitError
+				if !errors.As(err, &limitErr) {
+					t.Fatalf("expected a response size limit error, got %v", err)
+				}
+				if strings.Contains(err.Error(), "secret-response-value") {
+					t.Fatalf("response size error exposed response content: %v", err)
+				}
+				return
+			}
+			if test.wantError != nil {
+				if !errors.Is(err, test.wantError) {
+					t.Fatalf("response body returned %v, want %v", err, test.wantError)
+				}
+				return
+			}
+			if err != nil || string(body) != test.payload {
+				t.Fatalf("response body = %q, error = %v", body, err)
+			}
+		})
+	}
+}
+
+func TestRequestRejectsOversizedResponsesWithoutRetry(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		chunked    bool
+	}{
+		{name: "oversized content length", statusCode: http.StatusOK},
+		{name: "oversized chunked response", statusCode: http.StatusOK, chunked: true},
+		{name: "oversized retryable response", statusCode: http.StatusServiceUnavailable},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			const secret = "secret-organization-response"
+			payload, err := json.Marshal(map[string]any{"id": secret, "padding": strings.Repeat("x", 128)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var calls atomic.Int64
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				if test.statusCode >= http.StatusInternalServerError {
+					w.Header().Set("x-should-retry", "true")
+				}
+				if test.chunked {
+					w.WriteHeader(test.statusCode)
+					if flusher, ok := w.(http.Flusher); ok {
+						flusher.Flush()
+					}
+				} else {
+					w.Header().Set("Content-Length", fmt.Sprint(len(payload)))
+					w.WriteHeader(test.statusCode)
+				}
+				_, _ = w.Write(payload)
+			}))
+			t.Cleanup(server.Close)
+
+			maxRetries := 2
+			client := &APIClient{
+				ProviderVersion:   "test",
+				Client:            openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+				maxResponseBytes:  32,
+				requestMaxRetries: &maxRetries,
+			}
+			_, err = client.Request(context.Background(), http.MethodGet, "/organization/groups", nil, nil, nil)
+			var limitErr *responseBodyLimitError
+			if !errors.As(err, &limitErr) {
+				t.Fatalf("expected response size limit error, got %v", err)
+			}
+			if strings.Contains(err.Error(), secret) {
+				t.Fatalf("response size error exposed response content: %v", err)
+			}
+			if calls.Load() != 1 {
+				t.Fatalf("oversized response was retried %d times", calls.Load())
+			}
+		})
+	}
+}
+
+func TestRequestAcceptsLargeOrganizationPayloadAtLimit(t *testing.T) {
+	payload, err := json.Marshal(map[string]any{
+		"data":     []map[string]any{{"id": "organization-member", "description": strings.Repeat("member-", 1024)}},
+		"has_more": false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", fmt.Sprint(len(payload)))
+		_, _ = w.Write(payload)
+	}))
+	t.Cleanup(server.Close)
+
+	client := &APIClient{
+		ProviderVersion:  "test",
+		Client:           openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+		maxResponseBytes: int64(len(payload)),
+	}
+	response, err := client.Request(context.Background(), http.MethodGet, "/organization/users", nil, nil, nil)
+	if err != nil {
+		t.Fatalf("valid large organization response was rejected: %v", err)
+	}
+	items, err := ResponseObjectList(response, "data", true)
+	if err != nil || len(items) != 1 || items[0]["id"] != "organization-member" {
+		t.Fatalf("valid large organization response changed: %#v, error = %v", response, err)
+	}
+}
+
+func TestPaginatedRequestBoundsAggregateResponseBytes(t *testing.T) {
+	firstPage, err := json.Marshal(map[string]any{
+		"data":     []map[string]any{{"id": "member-1", "description": strings.Repeat("a", 64)}},
+		"has_more": true,
+		"next":     "cursor-2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondPage, err := json.Marshal(map[string]any{
+		"data":     []map[string]any{{"id": "secret-member-2", "description": strings.Repeat("b", 64)}},
+		"has_more": false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	aggregateSize := int64(len(firstPage) + len(secondPage))
+	tests := []struct {
+		name      string
+		limit     int64
+		chunked   bool
+		cached    bool
+		retry     bool
+		wantLimit bool
+		wantCalls int64
+	}{
+		{name: "aggregate exactly at limit", limit: aggregateSize, wantCalls: 2},
+		{name: "aggregate one byte above limit", limit: aggregateSize - 1, wantLimit: true, wantCalls: 2},
+		{name: "chunked aggregate one byte above limit", limit: aggregateSize - 1, chunked: true, wantLimit: true, wantCalls: 2},
+		{name: "cached aggregate one byte above limit", limit: aggregateSize - 1, cached: true, wantLimit: true, wantCalls: 2},
+		{name: "transient errors do not consume pagination budget", limit: aggregateSize, retry: true, wantCalls: 3},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var calls atomic.Int64
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				call := calls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				if test.retry && call == 1 {
+					w.Header().Set("Retry-After-Ms", "1")
+					w.WriteHeader(http.StatusServiceUnavailable)
+					_, _ = w.Write([]byte("{\"error\":{\"message\":\"retry\"}}"))
+					return
+				}
+				payload := firstPage
+				if r.URL.Query().Get("after") == "cursor-2" {
+					payload = secondPage
+				}
+				if test.chunked {
+					if flusher, ok := w.(http.Flusher); ok {
+						flusher.Flush()
+					}
+				} else {
+					w.Header().Set("Content-Length", fmt.Sprint(len(payload)))
+				}
+				_, _ = w.Write(payload)
+			}))
+			t.Cleanup(server.Close)
+
+			maxRetries := 1
+			client := &APIClient{
+				ProviderVersion:           "test",
+				Client:                    openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+				maxResponseBytes:          aggregateSize,
+				maxPaginatedResponseBytes: test.limit,
+				requestMaxRetries:         &maxRetries,
+			}
+			var response map[string]any
+			if test.cached {
+				response, err = client.CachedPaginatedRequest(
+					context.Background(),
+					"organization_users",
+					nil,
+					http.MethodGet,
+					"/organization/users",
+					nil,
+					nil,
+				)
+			} else {
+				response, err = client.PaginatedRequest(
+					context.Background(), http.MethodGet, "/organization/users", nil, nil,
+				)
+			}
+			if calls.Load() != test.wantCalls {
+				t.Fatalf("made %d requests, want %d", calls.Load(), test.wantCalls)
+			}
+			if test.wantLimit {
+				var limitErr *responseBodyLimitError
+				if !errors.As(err, &limitErr) || !strings.Contains(err.Error(), "paginated responses") {
+					t.Fatalf("expected aggregate response size limit error, got %v", err)
+				}
+				if strings.Contains(err.Error(), "secret-member-2") {
+					t.Fatalf("aggregate size error exposed response content: %v", err)
+				}
+				return
+			}
+			items, itemErr := ResponseObjectList(response, "data", true)
+			if err != nil || itemErr != nil || len(items) != 2 {
+				t.Fatalf("valid paginated response changed: %#v, errors = %v, %v", response, err, itemErr)
+			}
+		})
+	}
+}
+
+func TestCachedRequestsRejectOversizedResponses(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		call := calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		itemID := "member-1"
+		if call == 1 {
+			itemID = strings.Repeat("x", 128)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data":     []map[string]any{{"id": itemID}},
+			"has_more": false,
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	maxRetries := 2
+	client := &APIClient{
+		ProviderVersion:   "test",
+		Client:            openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+		maxResponseBytes:  96,
+		requestMaxRetries: &maxRetries,
+	}
+	read := func() (map[string]any, error) {
+		return client.CachedRequest(
+			context.Background(), "organization_users", nil, http.MethodGet, "/organization/users", nil, nil,
+		)
+	}
+	_, err := read()
+	var limitErr *responseBodyLimitError
+	if !errors.As(err, &limitErr) {
+		t.Fatalf("expected oversized cached response to fail, got %v", err)
+	}
+	for range 2 {
+		response, readErr := read()
+		items, itemErr := ResponseObjectList(response, "data", true)
+		if readErr != nil || itemErr != nil || len(items) != 1 || items[0]["id"] != "member-1" {
+			t.Fatalf("valid cached response changed: %#v, errors = %v, %v", response, readErr, itemErr)
+		}
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("oversized response was retried or cached; got %d upstream requests", calls.Load())
+	}
+}
 func TestRetryAfterDuration(t *testing.T) {
 	now := time.Date(2026, time.July, 20, 12, 0, 0, 0, time.UTC)
 	tests := []struct {

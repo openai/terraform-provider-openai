@@ -27,7 +27,7 @@ generate:
 		echo "Terraform CLI not found; install Terraform before generating documentation."; \
 		exit 1; \
 	}
-	cd tools; go generate ./...
+	cd tools; GOWORK=off go generate -mod=mod ./...
 
 fmt:
 	gofmt -s -w -e .
