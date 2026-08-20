@@ -192,8 +192,10 @@ func TestProviderRedirectNeverSendsAdminCredentialsToAnotherOrigin(t *testing.T)
 	}))
 	t.Cleanup(unapprovedServer.Close)
 
+	var approvedRequests atomic.Int32
 	var approvedAuthorization atomic.Value
 	approvedServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		approvedRequests.Add(1)
 		approvedAuthorization.Store(request.Header.Get("Authorization"))
 		http.Redirect(writer, request, unapprovedServer.URL+"/capture", http.StatusTemporaryRedirect)
 	}))
@@ -208,9 +210,17 @@ func TestProviderRedirectNeverSendsAdminCredentialsToAnotherOrigin(t *testing.T)
 		t.Fatalf("provider client has unexpected type %T", response.ResourceData)
 	}
 
-	err := client.Client.Get(context.Background(), "/organization/projects", nil, nil, option.WithMaxRetries(0))
+	_, err := client.Request(
+		context.Background(), http.MethodGet, "/organization/projects", nil, nil, nil,
+	)
 	if err == nil || !strings.Contains(err.Error(), "redirect crosses the configured OpenAI API origin") {
 		t.Fatalf("cross-origin redirect error = %v", err)
+	}
+	if strings.Contains(err.Error(), "http: read on closed response body") {
+		t.Fatalf("cross-origin redirect error was replaced while buffering: %v", err)
+	}
+	if got := approvedRequests.Load(); got != 1 {
+		t.Fatalf("approved redirect origin received %d requests, want 1", got)
 	}
 	if got := approvedAuthorization.Load(); got != "Bearer "+testAdminAPIKey {
 		t.Fatalf("approved origin authorization = %v", got)

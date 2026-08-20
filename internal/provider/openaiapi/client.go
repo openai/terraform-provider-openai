@@ -869,7 +869,7 @@ func (c *APIClient) requestTelemetryMiddleware(ctx context.Context, method strin
 			statusCode = response.StatusCode
 			responseBytes = response.ContentLength
 		}
-		if method == http.MethodGet && response != nil && response.Body != nil {
+		if err == nil && method == http.MethodGet && response != nil && response.Body != nil {
 			responseBody, bodyErr := c.readResponseBody(attemptContext, response)
 			responseBytes = int64(len(responseBody))
 			if bodyErr != nil {

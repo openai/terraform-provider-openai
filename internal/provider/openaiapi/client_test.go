@@ -258,6 +258,39 @@ func TestReadResponseBodyEnforcesLimitsAndClosesBodies(t *testing.T) {
 	}
 }
 
+func TestRequestMiddlewarePreservesTransportErrorsBeforeBuffering(t *testing.T) {
+	redirectErr := errors.New("redirect crosses the configured OpenAI API origin")
+	closedBodyErr := errors.New("http: read on closed response body")
+	body := &responseLimitTrackingBody{Reader: iotest.ErrReader(closedBodyErr)}
+	response := &http.Response{
+		StatusCode: http.StatusTemporaryRedirect,
+		Header:     make(http.Header),
+		Body:       body,
+	}
+	request := httptest.NewRequest(http.MethodGet, "https://api.openai.com/organization/projects", nil)
+	client := &APIClient{}
+	lifecycle := &requestLifecycleState{}
+
+	gotResponse, gotErr := client.requestTelemetryMiddleware(
+		context.Background(), http.MethodGet, "/organization/projects", lifecycle,
+	)(request, func(*http.Request) (*http.Response, error) {
+		return response, redirectErr
+	})
+
+	if gotResponse != response {
+		t.Fatalf("response = %p, want original response %p", gotResponse, response)
+	}
+	if !errors.Is(gotErr, redirectErr) {
+		t.Fatalf("error = %v, want original redirect error %v", gotErr, redirectErr)
+	}
+	if errors.Is(gotErr, closedBodyErr) {
+		t.Fatalf("redirect error was replaced by response-body error: %v", gotErr)
+	}
+	if body.closed {
+		t.Fatal("errored response body was consumed")
+	}
+}
+
 func TestRequestRejectsOversizedResponsesWithoutRetry(t *testing.T) {
 	tests := []struct {
 		name       string
