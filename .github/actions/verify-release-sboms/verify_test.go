@@ -678,7 +678,7 @@ func TestProductionReleaseUsesVerifiedSigner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	publish := regexp.MustCompile(`(?ms)^  goreleaser:\n.*?^    environment: publish\n.*?^          args: release --clean --draft\n.*?^      - name: Verify and publish release draft\n`)
+	publish := regexp.MustCompile(`(?ms)^  goreleaser:\n.*?^    environment: publish\n.*?^      - name: Run GoReleaser\n.*?^          "\$RELEASE_TOOLS_DIR/goreleaser" release --clean --draft\n.*?^      - name: Verify and publish release draft\n`)
 	if !publish.Match(workflow) {
 		t.Fatal("approved production publishing job does not verify the private GoReleaser draft before publication")
 	}
@@ -706,12 +706,16 @@ func TestProductionSigningDoesNotRestoreSharedGoCache(t *testing.T) {
 		t.Fatal("production publishing job restores a shared Go build cache")
 	}
 
+	tools := strings.Index(publish, "      - name: Install authenticated release tools\n")
+	dependencies := strings.Index(publish, "      - name: Verify release dependencies\n")
 	build := strings.Index(publish, "      - name: Build trusted release verifier\n")
 	secrets := strings.Index(publish, "      - name: Check publish environment secrets\n")
 	importKey := strings.Index(publish, "      - name: Import GPG key\n")
 	release := strings.Index(publish, "      - name: Run GoReleaser\n")
-	if build < 0 || secrets < 0 || importKey < 0 || release < 0 || setupLocation[0] >= build || build >= secrets || secrets >= importKey || importKey >= release {
-		t.Fatal("trusted release verifier is not built before signing secrets are exposed")
+	if tools < 0 || dependencies < 0 || build < 0 || secrets < 0 || importKey < 0 || release < 0 ||
+		setupLocation[0] >= tools || tools >= dependencies || dependencies >= build ||
+		build >= secrets || secrets >= importKey || importKey >= release {
+		t.Fatal("trusted release tools, dependencies, and verifier are not authenticated before signing secrets are exposed")
 	}
 	trustedBuild := publish[build:secrets]
 
@@ -721,6 +725,8 @@ func TestProductionSigningDoesNotRestoreSharedGoCache(t *testing.T) {
 		`echo "GOCACHE=$GOCACHE" >> "$GITHUB_ENV"`,
 		`go build -trimpath -o "$RUNNER_TEMP/release-verifier" .github/actions/verify-release-sboms/verify.go`,
 		`echo "$RUNNER_TEMP" >> "$GITHUB_PATH"`,
+		`GONOPROXY: "none"`,
+		`GOPROXY: "off"`,
 	} {
 		if !strings.Contains(trustedBuild, command) {
 			t.Errorf("production publishing job does not enforce isolated signing prerequisite %q", command)
