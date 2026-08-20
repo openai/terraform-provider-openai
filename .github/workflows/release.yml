@@ -43,6 +43,17 @@ jobs:
       - name: Verify release dependencies
         uses: ./.github/actions/verify-release-dependencies
 
+      - name: Build trusted release verifier
+        run: |
+          GOCACHE="$(mktemp -d "$RUNNER_TEMP/release-go-build-cache.XXXXXX")"
+          export GOCACHE
+          echo "GOCACHE=$GOCACHE" >> "$GITHUB_ENV"
+          go build -trimpath -o "$RUNNER_TEMP/release-verifier" .github/actions/verify-release-sboms/verify.go
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+        env:
+          GONOPROXY: "none"
+          GOPROXY: "off"
+
       - name: Check publish environment secrets
         env:
           HAS_GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY != '' }}
@@ -61,9 +72,15 @@ jobs:
       - name: Run GoReleaser
         run: |
           export PATH="$RELEASE_TOOLS_DIR:$PATH"
-          "$RELEASE_TOOLS_DIR/goreleaser" release --clean
+          "$RELEASE_TOOLS_DIR/goreleaser" release --clean --draft
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
           GONOPROXY: "none"
           GOPROXY: "off"
+
+      - name: Verify and publish release draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
+        run: release-verifier --publish "$GITHUB_REF_NAME" "$GPG_FINGERPRINT"

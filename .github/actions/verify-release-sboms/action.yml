@@ -36,18 +36,4 @@ runs:
 
     - name: Verify release SBOMs
       shell: bash
-      run: |
-        archive_count="$(find dist -type f -name '*.zip' | wc -l | tr -d ' ')"
-        sbom_count="$(find dist -type f -name '*.spdx.json' | wc -l | tr -d ' ')"
-        checksum_file="$(find dist -type f -name '*_SHA256SUMS' -print -quit)"
-
-        test "$archive_count" -gt 0
-        test "$sbom_count" -eq "$archive_count"
-        test -n "$checksum_file"
-
-        while IFS= read -r -d '' archive; do
-          sbom="${archive}.spdx.json"
-          test -f "$sbom"
-          jq -e '.spdxVersion and (.packages | length > 0)' "$sbom" >/dev/null
-          grep -Fq "  $(basename "$sbom")" "$checksum_file"
-        done < <(find dist -type f -name '*.zip' -print0)
+      run: go run "$GITHUB_ACTION_PATH/verify.go" dist/*_SHA256SUMS
