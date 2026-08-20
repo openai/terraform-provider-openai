@@ -24,6 +24,12 @@ func main() {
 }
 
 func run(args []string) error {
+	if len(args) > 0 && args[0] == "--publish" {
+		if len(args) != 3 {
+			return errors.New("usage: verify.go --publish RELEASE_TAG SIGNING_FINGERPRINT")
+		}
+		return publishReleaseDraft(args[1], args[2])
+	}
 	if len(args) == 0 || len(args) > 1 && (args[1] != "--sign" || len(args) == 2) {
 		return errors.New("usage: verify.go CHECKSUM_FILE [--sign GPG_ARGS...]")
 	}
@@ -272,19 +278,26 @@ type verifiedArtifact struct {
 }
 
 func verifyArtifact(name, path string, checksums map[string][]byte) (verifiedArtifact, error) {
-	expected, exists := checksums[name]
-	if !exists {
-		return verifiedArtifact{}, fmt.Errorf("checksum manifest has no entry for %q", name)
-	}
 	contents, mode, err := readArtifactSnapshot(path)
 	if err != nil {
 		return verifiedArtifact{}, fmt.Errorf("open release artifact %q: %w", name, err)
 	}
-	digest := sha256.Sum256(contents)
-	if !bytes.Equal(digest[:], expected) {
-		return verifiedArtifact{}, fmt.Errorf("SHA-256 checksum mismatch for %q", name)
+	if err := verifyArtifactContents(name, contents, checksums); err != nil {
+		return verifiedArtifact{}, err
 	}
 	return verifiedArtifact{name: name, path: path, contents: contents, mode: mode}, nil
+}
+
+func verifyArtifactContents(name string, contents []byte, checksums map[string][]byte) error {
+	expected, exists := checksums[name]
+	if !exists {
+		return fmt.Errorf("checksum manifest has no entry for %q", name)
+	}
+	digest := sha256.Sum256(contents)
+	if !bytes.Equal(digest[:], expected) {
+		return fmt.Errorf("SHA-256 checksum mismatch for %q", name)
+	}
+	return nil
 }
 
 func verifyMetadataArtifact(name, path string, checksums map[string][]byte, validate func(string, []byte) error) (verifiedArtifact, error) {
@@ -341,6 +354,165 @@ func verifyRegistryManifest(path string, document []byte) error {
 			return fmt.Errorf("terraform registry manifest %q has duplicate protocol version %q", path, version)
 		}
 		versions[version] = struct{}{}
+	}
+	return nil
+}
+
+func publishReleaseDraft(tag, fingerprint string) error {
+	assets, err := readDraftAssets(tag)
+	if err != nil {
+		return err
+	}
+	releaseName := "terraform-provider-openai_" + strings.TrimPrefix(tag, "v")
+	checksumName := releaseName + "_SHA256SUMS"
+	signatureName := checksumName + ".sig"
+	for _, name := range []string{checksumName, signatureName} {
+		if _, exists := assets[name]; !exists {
+			return fmt.Errorf("missing signed checksum artifact %q", name)
+		}
+	}
+
+	manifest, err := downloadReleaseAsset(tag, checksumName)
+	if err != nil {
+		return err
+	}
+	signature, err := downloadReleaseAsset(tag, signatureName)
+	if err != nil {
+		return err
+	}
+	if err := verifyReleaseSignature(manifest, signature, fingerprint); err != nil {
+		return err
+	}
+	checksums, err := readChecksums(manifest)
+	if err != nil {
+		return err
+	}
+	if err := verifyDraftArtifacts(tag, releaseName, assets, checksums); err != nil {
+		return err
+	}
+	if output, err := exec.Command("gh", "release", "edit", tag, "--draft=false").CombinedOutput(); err != nil {
+		return fmt.Errorf("publish verified release draft: %w: %s", err, bytes.TrimSpace(output))
+	}
+	return nil
+}
+
+func readDraftAssets(tag string) (map[string]struct{}, error) {
+	output, err := exec.Command("gh", "release", "view", tag, "--json", "tagName,isDraft,assets").Output()
+	if err != nil {
+		return nil, fmt.Errorf("inspect private release draft: %w", err)
+	}
+	var release struct {
+		TagName string `json:"tagName"`
+		Draft   bool   `json:"isDraft"`
+		Assets  []struct {
+			Name string `json:"name"`
+		} `json:"assets"`
+	}
+	if err := json.Unmarshal(output, &release); err != nil {
+		return nil, fmt.Errorf("parse private release draft: %w", err)
+	}
+	if release.TagName != tag || !release.Draft {
+		return nil, fmt.Errorf("release %q is not a private draft for the requested tag", tag)
+	}
+
+	assets := make(map[string]struct{}, len(release.Assets))
+	for _, asset := range release.Assets {
+		if filepath.Base(asset.Name) != asset.Name || strings.Contains(asset.Name, "\\") {
+			return nil, fmt.Errorf("uploaded release asset %q is not an artifact filename", asset.Name)
+		}
+		if _, exists := assets[asset.Name]; exists {
+			return nil, fmt.Errorf("duplicate uploaded release artifact %q", asset.Name)
+		}
+		assets[asset.Name] = struct{}{}
+	}
+	return assets, nil
+}
+
+func verifyDraftArtifacts(tag, releaseName string, assets map[string]struct{}, checksums map[string][]byte) error {
+	registryName := releaseName + "_manifest.json"
+	checksumName := releaseName + "_SHA256SUMS"
+	signatureName := checksumName + ".sig"
+	archives := 0
+	sboms := 0
+	for name := range assets {
+		if name == checksumName || name == signatureName {
+			continue
+		}
+		if name != registryName && !strings.HasSuffix(name, ".zip") && !strings.HasSuffix(name, ".spdx.json") {
+			return fmt.Errorf("unexpected uploaded release artifact %q", name)
+		}
+		contents, err := downloadReleaseAsset(tag, name)
+		if err != nil {
+			return err
+		}
+		if err := verifyArtifactContents(name, contents, checksums); err != nil {
+			return err
+		}
+		switch {
+		case name == registryName:
+			if err := verifyRegistryManifest(name, contents); err != nil {
+				return err
+			}
+		case strings.HasSuffix(name, ".zip"):
+			if err := verifyReleasePlatform(name, releaseName); err != nil {
+				return err
+			}
+			if _, exists := assets[name+".spdx.json"]; !exists {
+				return fmt.Errorf("uploaded archive %q has no matching SPDX SBOM", name)
+			}
+			archives++
+		case strings.HasSuffix(name, ".spdx.json"):
+			if err := verifySPDX(name, contents); err != nil {
+				return err
+			}
+			if _, exists := assets[strings.TrimSuffix(name, ".spdx.json")]; !exists {
+				return fmt.Errorf("uploaded SPDX SBOM %q has no matching archive", name)
+			}
+			sboms++
+		default:
+			return fmt.Errorf("unexpected uploaded release artifact %q", name)
+		}
+	}
+	if _, exists := assets[registryName]; !exists {
+		return fmt.Errorf("uploaded release has no Terraform Registry manifest %q", registryName)
+	}
+	if archives == 0 || archives != sboms || len(checksums) != len(assets)-2 {
+		return fmt.Errorf("uploaded release has an incomplete signed artifact set: archives=%d SBOMs=%d checksums=%d", archives, sboms, len(checksums))
+	}
+	return nil
+}
+
+func downloadReleaseAsset(tag, name string) ([]byte, error) {
+	contents, err := exec.Command("gh", "release", "download", tag, "--pattern", name, "--output", "-").Output()
+	if err != nil {
+		return nil, fmt.Errorf("download uploaded release artifact %q: %w", name, err)
+	}
+	return contents, nil
+}
+
+func verifyReleaseSignature(manifest, signature []byte, fingerprint string) error {
+	file, err := os.CreateTemp("", "verified-release-signature-*")
+	if err != nil {
+		return fmt.Errorf("create uploaded signature snapshot: %w", err)
+	}
+	defer func() {
+		_ = file.Close()
+		_ = os.Remove(file.Name())
+	}()
+	if _, err := file.Write(signature); err != nil {
+		return fmt.Errorf("write uploaded signature snapshot: %w", err)
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("rewind uploaded signature snapshot: %w", err)
+	}
+	if err := os.Remove(file.Name()); err != nil {
+		return fmt.Errorf("seal uploaded signature snapshot: %w", err)
+	}
+	verify := exec.Command("gpg", "--batch", "--assert-signer", fingerprint, "--verify", "/dev/fd/3", "-")
+	verify.ExtraFiles = []*os.File{file}
+	verify.Stdin = bytes.NewReader(manifest)
+	if output, err := verify.CombinedOutput(); err != nil {
+		return fmt.Errorf("verify uploaded checksum signature: %w: %s", err, bytes.TrimSpace(output))
 	}
 	return nil
 }

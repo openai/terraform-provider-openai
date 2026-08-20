@@ -36,6 +36,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+
       - name: Install authenticated release tools
         uses: ./.github/actions/setup-release-tools
 
@@ -71,9 +72,15 @@ jobs:
       - name: Run GoReleaser
         run: |
           export PATH="$RELEASE_TOOLS_DIR:$PATH"
-          "$RELEASE_TOOLS_DIR/goreleaser" release --clean
+          "$RELEASE_TOOLS_DIR/goreleaser" release --clean --draft
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
           GONOPROXY: "none"
           GOPROXY: "off"
+
+      - name: Verify and publish release draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
+        run: release-verifier --publish "$GITHUB_REF_NAME" "$GPG_FINGERPRINT"

@@ -670,9 +670,12 @@ func TestProductionReleaseUsesVerifiedSigner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	publish := regexp.MustCompile(`(?ms)^  goreleaser:\n.*?^    environment: publish\n.*?^          args: release --clean\n`)
+	publish := regexp.MustCompile(`(?ms)^  goreleaser:\n.*?^    environment: publish\n.*?^          args: release --clean --draft\n.*?^      - name: Verify and publish release draft\n`)
 	if !publish.Match(workflow) {
-		t.Fatal("approved production publishing job does not execute the verified GoReleaser release")
+		t.Fatal("approved production publishing job does not verify the private GoReleaser draft before publication")
+	}
+	if !strings.Contains(string(workflow), `release-verifier --publish "$GITHUB_REF_NAME" "$GPG_FINGERPRINT"`) {
+		t.Fatal("production publishing job does not require the trusted release-wide publication verifier")
 	}
 }
 
