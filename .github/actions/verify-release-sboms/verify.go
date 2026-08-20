@@ -1,9 +1,11 @@
 package main
 
 import (
+	"archive/zip"
 	"bufio"
 	"bytes"
 	"crypto/sha256"
+	"debug/buildinfo"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -144,7 +146,9 @@ func verifyReleaseSnapshot(checksumPath string, manifest []byte, artifacts *[]ve
 			return err
 		}
 		*artifacts = append(*artifacts, archive)
-		sbom, err := verifyMetadataArtifact(sbomName, sbomPath, checksums, verifySPDX)
+		sbom, err := verifyMetadataArtifact(sbomName, sbomPath, checksums, func(path string, document []byte) error {
+			return verifyArchiveSPDX(path, document, archive.name, archive.contents)
+		})
 		if err != nil {
 			return err
 		}
@@ -327,16 +331,119 @@ func verifyMetadataArtifact(name, path string, checksums map[string][]byte, vali
 	return artifact, nil
 }
 
-func verifySPDX(path string, document []byte) error {
-	var spdx struct {
-		Version  string            `json:"spdxVersion"`
-		Packages []json.RawMessage `json:"packages"`
-	}
+type spdxDocument struct {
+	Version       string `json:"spdxVersion"`
+	Name          string `json:"name"`
+	Relationships []struct {
+		Element string `json:"spdxElementId"`
+		Type    string `json:"relationshipType"`
+		Related string `json:"relatedSpdxElement"`
+	} `json:"relationships"`
+	Packages []struct {
+		ID       string `json:"SPDXID"`
+		Name     string `json:"name"`
+		Version  string `json:"versionInfo"`
+		Supplier string `json:"supplier"`
+		License  string `json:"licenseConcluded"`
+	} `json:"packages"`
+}
+
+func parseSPDX(path string, document []byte) (spdxDocument, error) {
+	var spdx spdxDocument
 	if err := json.Unmarshal(document, &spdx); err != nil {
-		return fmt.Errorf("parse SPDX SBOM %q: %w", path, err)
+		return spdxDocument{}, fmt.Errorf("parse SPDX SBOM %q: %w", path, err)
 	}
 	if spdx.Version == "" || len(spdx.Packages) == 0 {
-		return fmt.Errorf("SPDX SBOM %q has no version or packages", path)
+		return spdxDocument{}, fmt.Errorf("SPDX SBOM %q has no version or packages", path)
+	}
+	return spdx, nil
+}
+
+func verifyArchiveSPDX(path string, document []byte, archiveName string, archive []byte) error {
+	spdx, err := parseSPDX(path, document)
+	if err != nil {
+		return err
+	}
+	if spdx.Name != archiveName {
+		return fmt.Errorf("SPDX SBOM %q does not identify archive %q", path, archiveName)
+	}
+
+	var root string
+	for _, relationship := range spdx.Relationships {
+		if relationship.Element == "SPDXRef-DOCUMENT" && relationship.Type == "DESCRIBES" {
+			if root != "" {
+				return fmt.Errorf("SPDX SBOM %q describes more than one provider archive", path)
+			}
+			root = relationship.Related
+		}
+	}
+	if root == "" {
+		return fmt.Errorf("SPDX SBOM %q does not describe its provider archive", path)
+	}
+
+	digest := fmt.Sprintf("sha256:%x", sha256.Sum256(archive))
+	modules := make(map[string]string, len(spdx.Packages))
+	foundRoot := false
+	foundSDK := false
+	for _, entry := range spdx.Packages {
+		if entry.ID == root {
+			if entry.Name != archiveName || entry.Version != digest ||
+				entry.Supplier != "" && entry.Supplier != "NOASSERTION" {
+				return fmt.Errorf("SPDX SBOM %q has an invalid archive identity, SHA-256 digest, or supplier", path)
+			}
+			foundRoot = true
+		}
+		modules[entry.Name] = entry.Version
+		if entry.Name == "github.com/openai/openai-go/v3" && entry.License == "Apache-2.0" {
+			foundSDK = true
+		}
+	}
+	if !foundRoot {
+		return fmt.Errorf("SPDX SBOM %q has no matching provider archive package", path)
+	}
+	if !foundSDK {
+		return fmt.Errorf("SPDX SBOM %q has no Apache-2.0 OpenAI SDK package", path)
+	}
+
+	zipped, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
+	if err != nil {
+		return fmt.Errorf("read provider archive for SPDX SBOM %q: %w", path, err)
+	}
+	var provider *zip.File
+	for _, entry := range zipped.File {
+		if strings.HasPrefix(entry.Name, "terraform-provider-openai_v") && !strings.Contains(entry.Name, "/") {
+			if provider != nil {
+				return fmt.Errorf("provider archive for SPDX SBOM %q contains more than one provider executable", path)
+			}
+			provider = entry
+		}
+	}
+	if provider == nil {
+		return fmt.Errorf("provider archive for SPDX SBOM %q contains no provider executable", path)
+	}
+	file, err := provider.Open()
+	if err != nil {
+		return fmt.Errorf("open provider executable for SPDX SBOM %q: %w", path, err)
+	}
+	binary, readErr := io.ReadAll(file)
+	closeErr := file.Close()
+	if readErr != nil {
+		return fmt.Errorf("read provider executable for SPDX SBOM %q: %w", path, readErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close provider executable for SPDX SBOM %q: %w", path, closeErr)
+	}
+	info, err := buildinfo.Read(bytes.NewReader(binary))
+	if err != nil {
+		return fmt.Errorf("read provider module inventory for SPDX SBOM %q: %w", path, err)
+	}
+	if len(info.Deps) == 0 {
+		return fmt.Errorf("provider executable for SPDX SBOM %q has no module dependencies", path)
+	}
+	for _, module := range info.Deps {
+		if modules[module.Path] != module.Version {
+			return fmt.Errorf("SPDX SBOM %q omits provider dependency %q version %q", path, module.Path, module.Version)
+		}
 	}
 	return nil
 }
@@ -470,8 +577,7 @@ func verifyDraftArtifacts(tag, releaseName string, assets map[string]releaseAsse
 	registryName := releaseName + "_manifest.json"
 	checksumName := releaseName + "_SHA256SUMS"
 	signatureName := checksumName + ".sig"
-	archives := 0
-	sboms := 0
+	verified := make(map[string][]byte, len(assets)-2)
 	for name, asset := range assets {
 		if name == checksumName || name == signatureName {
 			continue
@@ -486,25 +592,36 @@ func verifyDraftArtifacts(tag, releaseName string, assets map[string]releaseAsse
 		if err := verifyArtifactContents(name, contents, checksums); err != nil {
 			return err
 		}
+		verified[name] = contents
+	}
+	for name := range verified {
+		if strings.HasSuffix(name, ".zip") {
+			if err := verifyReleasePlatform(name, releaseName); err != nil {
+				return err
+			}
+			if _, exists := verified[name+".spdx.json"]; !exists {
+				return fmt.Errorf("uploaded archive %q has no matching SPDX SBOM", name)
+			}
+		}
+	}
+	archives := 0
+	sboms := 0
+	for name, contents := range verified {
 		switch {
 		case name == registryName:
 			if err := verifyRegistryManifest(name, contents); err != nil {
 				return err
 			}
 		case strings.HasSuffix(name, ".zip"):
-			if err := verifyReleasePlatform(name, releaseName); err != nil {
-				return err
-			}
-			if _, exists := assets[name+".spdx.json"]; !exists {
-				return fmt.Errorf("uploaded archive %q has no matching SPDX SBOM", name)
-			}
 			archives++
 		case strings.HasSuffix(name, ".spdx.json"):
-			if err := verifySPDX(name, contents); err != nil {
-				return err
-			}
-			if _, exists := assets[strings.TrimSuffix(name, ".spdx.json")]; !exists {
+			archiveName := strings.TrimSuffix(name, ".spdx.json")
+			archive, exists := verified[archiveName]
+			if !exists {
 				return fmt.Errorf("uploaded SPDX SBOM %q has no matching archive", name)
+			}
+			if err := verifyArchiveSPDX(name, contents, archiveName, archive); err != nil {
+				return err
 			}
 			sboms++
 		default:
@@ -555,8 +672,8 @@ func verifyReleaseSignature(manifest, signature []byte, fingerprint string) erro
 	verify := exec.Command("gpg", "--batch", "--assert-signer", fingerprint, "--verify", "/dev/fd/3", "-")
 	verify.ExtraFiles = []*os.File{file}
 	verify.Stdin = bytes.NewReader(manifest)
-	if output, err := verify.CombinedOutput(); err != nil {
-		return fmt.Errorf("verify uploaded checksum signature: %w: %s", err, bytes.TrimSpace(output))
+	if err := verify.Run(); err != nil {
+		return fmt.Errorf("verify uploaded checksum signature: %w", err)
 	}
 	return nil
 }

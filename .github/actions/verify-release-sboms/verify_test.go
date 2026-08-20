@@ -443,7 +443,11 @@ func TestSigningBindsVerifiedChecksumSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	forged := strings.Replace(string(verified), fmt.Sprintf("%x", sha256.Sum256([]byte("provider archive"))), strings.Repeat("0", 64), 1)
+	archive, err := os.ReadFile(fixture.archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forged := strings.Replace(string(verified), fmt.Sprintf("%x", sha256.Sum256(archive)), strings.Repeat("0", 64), 1)
 	forgedPath := filepath.Join(directory, "forged-checksums")
 	signedPath := filepath.Join(directory, "signed-checksums")
 	writeFixtureFile(t, forgedPath, []byte(forged))
@@ -589,8 +593,11 @@ func TestMetadataValidationUsesItsHashedSnapshot(t *testing.T) {
 			},
 			malformed: `{"spdxVersion":"SPDX-2.3","packages":[]}`,
 			valid:     `{"spdxVersion":"SPDX-2.3","packages":[{"name":"provider"}]}`,
-			validate:  verifySPDX,
-			wantErr:   "has no version or packages",
+			validate: func(path string, document []byte) error {
+				_, err := parseSPDX(path, document)
+				return err
+			},
+			wantErr: "has no version or packages",
 		},
 	}
 
@@ -801,9 +808,7 @@ func newReleaseFixture(t *testing.T) releaseFixture {
 	writeFixtureFile(t, fixture.registry, []byte(`{"version":1,"metadata":{"protocol_versions":["6.0"]}}`))
 	for _, platform := range releasePlatforms {
 		path := filepath.Join(directory, "terraform-provider-openai_1.2.3_"+platform+".zip")
-		writeFixtureFile(t, path, []byte("provider archive"))
-		writeFixtureFile(t, path+".spdx.json",
-			[]byte(`{"spdxVersion":"SPDX-2.3","packages":[{"name":"terraform-provider-openai"}]}`))
+		writeReleaseFixtureArchive(t, path)
 	}
 	fixture.writeChecksums(t)
 	return fixture

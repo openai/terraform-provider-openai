@@ -159,6 +159,44 @@ func TestDraftPublicationRejectsUnverifiedRemoteArtifacts(t *testing.T) {
 			wantErr:        "has no version or packages",
 		},
 		{
+			name: "signed SPDX with forged provider archive identity",
+			mutate: func(t *testing.T, remote string, fixture releaseFixture) {
+				name := filepath.Base(fixture.archive) + ".spdx.json"
+				contents, err := os.ReadFile(filepath.Join(remote, name))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var document map[string]any
+				if err := json.Unmarshal(contents, &document); err != nil {
+					t.Fatal(err)
+				}
+				document["name"] = "attacker-rebound-provider.zip"
+				forged, err := json.Marshal(document)
+				if err != nil {
+					t.Fatal(err)
+				}
+				replaceRemoteArtifact(t, remote, fixture, name, forged)
+			},
+			draft:          true,
+			resignManifest: true,
+			wantErr:        "does not identify archive",
+		},
+		{
+			name: "signed archive replaced after SPDX generation",
+			mutate: func(t *testing.T, remote string, fixture releaseFixture) {
+				name := filepath.Base(fixture.archive)
+				contents, err := os.ReadFile(filepath.Join(remote, name))
+				if err != nil {
+					t.Fatal(err)
+				}
+				replaceRemoteArtifact(t, remote, fixture, name,
+					append(contents, []byte("post-generation replacement")...))
+			},
+			draft:          true,
+			resignManifest: true,
+			wantErr:        "invalid archive identity, SHA-256 digest, or supplier",
+		},
+		{
 			name: "signed unsupported archive platform",
 			mutate: func(t *testing.T, remote string, fixture releaseFixture) {
 				original := filepath.Base(fixture.archive)
