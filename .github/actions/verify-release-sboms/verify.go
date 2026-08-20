@@ -166,7 +166,10 @@ func verifyReleaseSnapshot(checksumPath string, manifest []byte, artifacts *[]ve
 			return fmt.Errorf("unexpected checksum manifest entry %q", name)
 		}
 	}
-	return nil
+	return verifyCompleteReleasePlatforms(releaseName, func(name string) bool {
+		_, exists := archives[name]
+		return exists
+	})
 }
 
 func readArtifactSnapshot(path string) ([]byte, fs.FileMode, error) {
@@ -250,6 +253,13 @@ func publishVerifiedSnapshot(path string, contents []byte, mode fs.FileMode) err
 	return nil
 }
 
+var releasePlatforms = [...]string{
+	"darwin_amd64", "darwin_arm64",
+	"freebsd_386", "freebsd_amd64", "freebsd_arm", "freebsd_arm64",
+	"linux_386", "linux_amd64", "linux_arm", "linux_arm64",
+	"windows_386", "windows_amd64", "windows_arm64",
+}
+
 func verifyReleasePlatform(name, releaseName string) error {
 	archive, valid := strings.CutSuffix(name, ".zip")
 	if !valid {
@@ -259,15 +269,21 @@ func verifyReleasePlatform(name, releaseName string) error {
 	if !valid {
 		return fmt.Errorf("archive %q does not belong to release %q", name, releaseName)
 	}
-	switch platform {
-	case "darwin_amd64", "darwin_arm64",
-		"freebsd_386", "freebsd_amd64", "freebsd_arm", "freebsd_arm64",
-		"linux_386", "linux_amd64", "linux_arm", "linux_arm64",
-		"windows_386", "windows_amd64", "windows_arm64":
-		return nil
-	default:
-		return fmt.Errorf("archive %q has unsupported release platform %q", name, platform)
+	for _, supported := range releasePlatforms {
+		if platform == supported {
+			return nil
+		}
 	}
+	return fmt.Errorf("archive %q has unsupported release platform %q", name, platform)
+}
+
+func verifyCompleteReleasePlatforms(releaseName string, exists func(string) bool) error {
+	for _, platform := range releasePlatforms {
+		if !exists(releaseName + "_" + platform + ".zip") {
+			return fmt.Errorf("release is missing configured platform %q", platform)
+		}
+	}
+	return nil
 }
 
 type verifiedArtifact struct {
@@ -372,11 +388,11 @@ func publishReleaseDraft(tag, fingerprint string) error {
 		}
 	}
 
-	manifest, err := downloadReleaseAsset(tag, checksumName)
+	manifest, err := downloadReleaseAsset(tag, assets[checksumName])
 	if err != nil {
 		return err
 	}
-	signature, err := downloadReleaseAsset(tag, signatureName)
+	signature, err := downloadReleaseAsset(tag, assets[signatureName])
 	if err != nil {
 		return err
 	}
@@ -390,23 +406,40 @@ func publishReleaseDraft(tag, fingerprint string) error {
 	if err := verifyDraftArtifacts(tag, releaseName, assets, checksums); err != nil {
 		return err
 	}
+	current, err := readDraftAssets(tag)
+	if err != nil {
+		return err
+	}
+	if len(current) != len(assets) {
+		return errors.New("uploaded release assets changed during verification")
+	}
+	for name, asset := range assets {
+		if current[name] != asset {
+			return errors.New("uploaded release assets changed during verification")
+		}
+	}
 	if output, err := exec.Command("gh", "release", "edit", tag, "--draft=false").CombinedOutput(); err != nil {
 		return fmt.Errorf("publish verified release draft: %w: %s", err, bytes.TrimSpace(output))
 	}
 	return nil
 }
 
-func readDraftAssets(tag string) (map[string]struct{}, error) {
+type releaseAsset struct {
+	Name   string `json:"name"`
+	ID     string `json:"id"`
+	Digest string `json:"digest"`
+	State  string `json:"state"`
+}
+
+func readDraftAssets(tag string) (map[string]releaseAsset, error) {
 	output, err := exec.Command("gh", "release", "view", tag, "--json", "tagName,isDraft,assets").Output()
 	if err != nil {
 		return nil, fmt.Errorf("inspect private release draft: %w", err)
 	}
 	var release struct {
-		TagName string `json:"tagName"`
-		Draft   bool   `json:"isDraft"`
-		Assets  []struct {
-			Name string `json:"name"`
-		} `json:"assets"`
+		TagName string         `json:"tagName"`
+		Draft   bool           `json:"isDraft"`
+		Assets  []releaseAsset `json:"assets"`
 	}
 	if err := json.Unmarshal(output, &release); err != nil {
 		return nil, fmt.Errorf("parse private release draft: %w", err)
@@ -415,7 +448,7 @@ func readDraftAssets(tag string) (map[string]struct{}, error) {
 		return nil, fmt.Errorf("release %q is not a private draft for the requested tag", tag)
 	}
 
-	assets := make(map[string]struct{}, len(release.Assets))
+	assets := make(map[string]releaseAsset, len(release.Assets))
 	for _, asset := range release.Assets {
 		if filepath.Base(asset.Name) != asset.Name || strings.Contains(asset.Name, "\\") {
 			return nil, fmt.Errorf("uploaded release asset %q is not an artifact filename", asset.Name)
@@ -423,25 +456,30 @@ func readDraftAssets(tag string) (map[string]struct{}, error) {
 		if _, exists := assets[asset.Name]; exists {
 			return nil, fmt.Errorf("duplicate uploaded release artifact %q", asset.Name)
 		}
-		assets[asset.Name] = struct{}{}
+		digest, valid := strings.CutPrefix(asset.Digest, "sha256:")
+		decoded, err := hex.DecodeString(digest)
+		if asset.ID == "" || asset.State != "uploaded" || !valid || err != nil || len(decoded) != sha256.Size {
+			return nil, fmt.Errorf("uploaded release artifact %q has no immutable uploaded identity and SHA-256 digest", asset.Name)
+		}
+		assets[asset.Name] = asset
 	}
 	return assets, nil
 }
 
-func verifyDraftArtifacts(tag, releaseName string, assets map[string]struct{}, checksums map[string][]byte) error {
+func verifyDraftArtifacts(tag, releaseName string, assets map[string]releaseAsset, checksums map[string][]byte) error {
 	registryName := releaseName + "_manifest.json"
 	checksumName := releaseName + "_SHA256SUMS"
 	signatureName := checksumName + ".sig"
 	archives := 0
 	sboms := 0
-	for name := range assets {
+	for name, asset := range assets {
 		if name == checksumName || name == signatureName {
 			continue
 		}
 		if name != registryName && !strings.HasSuffix(name, ".zip") && !strings.HasSuffix(name, ".spdx.json") {
 			return fmt.Errorf("unexpected uploaded release artifact %q", name)
 		}
-		contents, err := downloadReleaseAsset(tag, name)
+		contents, err := downloadReleaseAsset(tag, asset)
 		if err != nil {
 			return err
 		}
@@ -479,13 +517,19 @@ func verifyDraftArtifacts(tag, releaseName string, assets map[string]struct{}, c
 	if archives == 0 || archives != sboms || len(checksums) != len(assets)-2 {
 		return fmt.Errorf("uploaded release has an incomplete signed artifact set: archives=%d SBOMs=%d checksums=%d", archives, sboms, len(checksums))
 	}
-	return nil
+	return verifyCompleteReleasePlatforms(releaseName, func(name string) bool {
+		_, exists := assets[name]
+		return exists
+	})
 }
 
-func downloadReleaseAsset(tag, name string) ([]byte, error) {
-	contents, err := exec.Command("gh", "release", "download", tag, "--pattern", name, "--output", "-").Output()
+func downloadReleaseAsset(tag string, asset releaseAsset) ([]byte, error) {
+	contents, err := exec.Command("gh", "release", "download", tag, "--pattern", asset.Name, "--output", "-").Output()
 	if err != nil {
-		return nil, fmt.Errorf("download uploaded release artifact %q: %w", name, err)
+		return nil, fmt.Errorf("download uploaded release artifact %q: %w", asset.Name, err)
+	}
+	if fmt.Sprintf("sha256:%x", sha256.Sum256(contents)) != asset.Digest {
+		return nil, fmt.Errorf("uploaded release artifact %q does not match its immutable SHA-256 digest", asset.Name)
 	}
 	return contents, nil
 }

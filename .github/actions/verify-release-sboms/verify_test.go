@@ -30,13 +30,17 @@ func TestVerifyRelease(t *testing.T) {
 		{
 			name: "supported freebsd arm release platform",
 			mutate: func(t *testing.T, fixture releaseFixture) {
-				renameFixtureArchive(t, fixture, "terraform-provider-openai_1.2.3_freebsd_arm.zip")
+				if _, err := os.Stat(filepath.Join(fixture.directory, "terraform-provider-openai_1.2.3_freebsd_arm.zip")); err != nil {
+					t.Fatal(err)
+				}
 			},
 		},
 		{
 			name: "supported windows arm64 release platform",
 			mutate: func(t *testing.T, fixture releaseFixture) {
-				renameFixtureArchive(t, fixture, "terraform-provider-openai_1.2.3_windows_arm64.zip")
+				if _, err := os.Stat(filepath.Join(fixture.directory, "terraform-provider-openai_1.2.3_windows_arm64.zip")); err != nil {
+					t.Fatal(err)
+				}
 			},
 		},
 		{
@@ -312,7 +316,11 @@ func TestVerifyRelease(t *testing.T) {
 		{
 			name: "no archives",
 			mutate: func(t *testing.T, fixture releaseFixture) {
-				for _, path := range []string{fixture.archive, fixture.archive + ".spdx.json"} {
+				paths, err := filepath.Glob(filepath.Join(fixture.directory, "*.zip*"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, path := range paths {
 					if err := os.Remove(path); err != nil {
 						t.Fatal(err)
 					}
@@ -785,9 +793,12 @@ func newReleaseFixture(t *testing.T) releaseFixture {
 		registry:  filepath.Join(root, "terraform-registry-manifest.json"),
 	}
 	writeFixtureFile(t, fixture.registry, []byte(`{"version":1,"metadata":{"protocol_versions":["6.0"]}}`))
-	writeFixtureFile(t, archive, []byte("provider archive"))
-	writeFixtureFile(t, archive+".spdx.json",
-		[]byte(`{"spdxVersion":"SPDX-2.3","packages":[{"name":"terraform-provider-openai"}]}`))
+	for _, platform := range releasePlatforms {
+		path := filepath.Join(directory, "terraform-provider-openai_1.2.3_"+platform+".zip")
+		writeFixtureFile(t, path, []byte("provider archive"))
+		writeFixtureFile(t, path+".spdx.json",
+			[]byte(`{"spdxVersion":"SPDX-2.3","packages":[{"name":"terraform-provider-openai"}]}`))
+	}
 	fixture.writeChecksums(t)
 	return fixture
 }

@@ -17,9 +17,105 @@ func TestDraftPublicationRejectsUnverifiedRemoteArtifacts(t *testing.T) {
 		draft            bool
 		resignManifest   bool
 		wrongFingerprint bool
+		swapTarget       string
+		swapAfter        string
+		mutateInventory  func([]releaseAsset)
 		wantErr          string
 	}{
 		{name: "valid signed draft", draft: true},
+		{
+			name: "remote asset has no immutable identity",
+			mutateInventory: func(assets []releaseAsset) {
+				assets[0].ID = ""
+			},
+			draft:   true,
+			wantErr: "no immutable uploaded identity and SHA-256 digest",
+		},
+		{
+			name: "remote asset has no immutable digest",
+			mutateInventory: func(assets []releaseAsset) {
+				assets[0].Digest = ""
+			},
+			draft:   true,
+			wantErr: "no immutable uploaded identity and SHA-256 digest",
+		},
+		{
+			name: "remote asset is not completely uploaded",
+			mutateInventory: func(assets []releaseAsset) {
+				assets[0].State = "starter"
+			},
+			draft:   true,
+			wantErr: "no immutable uploaded identity and SHA-256 digest",
+		},
+		{
+			name: "remote asset bytes do not match immutable digest",
+			mutateInventory: func(assets []releaseAsset) {
+				for index := range assets {
+					if assets[index].Name == "terraform-provider-openai_1.2.3_SHA256SUMS" {
+						assets[index].Digest = "sha256:" + strings.Repeat("0", sha256.Size*2)
+					}
+				}
+			},
+			draft:   true,
+			wantErr: "does not match its immutable SHA-256 digest",
+		},
+		{
+			name:       "checksum replaced after verified download",
+			draft:      true,
+			swapTarget: "terraform-provider-openai_1.2.3_SHA256SUMS",
+			swapAfter:  "terraform-provider-openai_1.2.3_SHA256SUMS.sig",
+			wantErr:    "uploaded release assets changed during verification",
+		},
+		{
+			name:       "signature replaced after verified download",
+			draft:      true,
+			swapTarget: "terraform-provider-openai_1.2.3_SHA256SUMS.sig",
+			wantErr:    "uploaded release assets changed during verification",
+		},
+		{
+			name:       "archive replaced after verified download",
+			draft:      true,
+			swapTarget: "terraform-provider-openai_1.2.3_linux_amd64.zip",
+			wantErr:    "uploaded release assets changed during verification",
+		},
+		{
+			name:       "SPDX replaced after verified download",
+			draft:      true,
+			swapTarget: "terraform-provider-openai_1.2.3_linux_amd64.zip.spdx.json",
+			wantErr:    "uploaded release assets changed during verification",
+		},
+		{
+			name:       "registry replaced after verified download",
+			draft:      true,
+			swapTarget: "terraform-provider-openai_1.2.3_manifest.json",
+			wantErr:    "uploaded release assets changed during verification",
+		},
+		{
+			name: "signed release omits a configured platform and both checksum entries",
+			mutate: func(t *testing.T, remote string, fixture releaseFixture) {
+				archive := "terraform-provider-openai_1.2.3_linux_arm64.zip"
+				for _, name := range []string{archive, archive + ".spdx.json"} {
+					if err := os.Remove(filepath.Join(remote, name)); err != nil {
+						t.Fatal(err)
+					}
+				}
+				path := filepath.Join(remote, filepath.Base(fixture.manifest))
+				contents, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var retained []string
+				for _, line := range strings.Split(strings.TrimSuffix(string(contents), "\n"), "\n") {
+					if !strings.HasSuffix(line, "  "+archive) && !strings.HasSuffix(line, "  "+archive+".spdx.json") {
+						retained = append(retained, line)
+					}
+				}
+				writeFixtureFile(t, path, []byte(strings.Join(retained, "\n")+"\n"))
+			},
+			draft:          true,
+			resignManifest: true,
+			wantErr:        "missing configured platform",
+		},
 		{
 			name: "post-sign registry replacement refreshes signed checksums",
 			mutate: func(t *testing.T, remote string, fixture releaseFixture) {
@@ -137,7 +233,11 @@ func TestDraftPublicationRejectsUnverifiedRemoteArtifacts(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			fixture := newReleaseFixture(t)
 			remote := t.TempDir()
-			for _, path := range []string{fixture.archive, fixture.archive + ".spdx.json", fixture.manifest} {
+			paths, err := filepath.Glob(filepath.Join(fixture.directory, "*"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, path := range paths {
 				contents, err := os.ReadFile(path)
 				if err != nil {
 					t.Fatal(err)
@@ -175,9 +275,19 @@ func TestDraftPublicationRejectsUnverifiedRemoteArtifacts(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			assets := make([]map[string]string, 0, len(entries))
+			assets := make([]releaseAsset, 0, len(entries))
 			for _, entry := range entries {
-				assets = append(assets, map[string]string{"name": entry.Name()})
+				contents, err := os.ReadFile(filepath.Join(remote, entry.Name()))
+				if err != nil {
+					t.Fatal(err)
+				}
+				assets = append(assets, releaseAsset{
+					Name: entry.Name(), ID: "asset-" + entry.Name(),
+					Digest: fmt.Sprintf("sha256:%x", sha256.Sum256(contents)), State: "uploaded",
+				})
+			}
+			if test.mutateInventory != nil {
+				test.mutateInventory(assets)
 			}
 			description, err := json.Marshal(map[string]any{"tagName": "v1.2.3", "isDraft": test.draft, "assets": assets})
 			if err != nil {
@@ -185,13 +295,40 @@ func TestDraftPublicationRejectsUnverifiedRemoteArtifacts(t *testing.T) {
 			}
 			descriptionPath := filepath.Join(directory, "release.json")
 			writeFixtureFile(t, descriptionPath, description)
+			if test.swapTarget != "" {
+				replacement := []byte("unverified replacement after download")
+				for index := range assets {
+					if assets[index].Name == test.swapTarget {
+						assets[index].ID = "replacement-" + test.swapTarget
+						assets[index].Digest = fmt.Sprintf("sha256:%x", sha256.Sum256(replacement))
+					}
+				}
+				swapped, err := json.Marshal(map[string]any{"tagName": "v1.2.3", "isDraft": test.draft, "assets": assets})
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeFixtureFile(t, filepath.Join(directory, "swapped-release.json"), swapped)
+				writeFixtureFile(t, filepath.Join(directory, "replacement"), replacement)
+			}
 			published := filepath.Join(directory, "published-release")
 
 			gh := filepath.Join(directory, "gh")
 			writeFixtureFile(t, gh, []byte("#!/bin/sh\n"+
 				"if [ \"$1:$2\" = release:view ]; then cat \"$MOCK_RELEASE_DESCRIPTION\"; exit; fi\n"+
 				"if [ \"$1:$2\" = release:edit ]; then printf '%s\\n' \"$@\" > \"$MOCK_PUBLISH_RECORD\"; exit; fi\n"+
-				"if [ \"$1:$2\" = release:download ]; then shift 3; while [ $# -gt 0 ]; do if [ \"$1\" = --pattern ]; then shift; asset=\"$1\"; fi; shift; done; cat \"$MOCK_RELEASE_ASSETS/$asset\"; exit; fi\n"+
+				"if [ \"$1:$2\" = release:download ]; then\n"+
+				"  shift 3\n"+
+				"  while [ $# -gt 0 ]; do\n"+
+				"    if [ \"$1\" = --pattern ]; then shift; asset=\"$1\"; fi\n"+
+				"    shift\n"+
+				"  done\n"+
+				"  cat \"$MOCK_RELEASE_ASSETS/$asset\"\n"+
+				"  if [ \"$asset\" = \"${MOCK_SWAP_AFTER:-}\" ]; then\n"+
+				"    cp \"$MOCK_SWAP_SOURCE\" \"$MOCK_RELEASE_ASSETS/$MOCK_SWAP_TARGET\"\n"+
+				"    cp \"$MOCK_SWAPPED_DESCRIPTION\" \"$MOCK_RELEASE_DESCRIPTION\"\n"+
+				"  fi\n"+
+				"  exit\n"+
+				"fi\n"+
 				"exit 2\n"))
 			gpg := filepath.Join(directory, "gpg")
 			writeFixtureFile(t, gpg, []byte("#!/bin/sh\n"+
@@ -211,6 +348,16 @@ func TestDraftPublicationRejectsUnverifiedRemoteArtifacts(t *testing.T) {
 			t.Setenv("MOCK_EXPECTED_MANIFEST", expectedManifest)
 			t.Setenv("MOCK_EXPECTED_SIGNATURE", expectedSignature)
 			t.Setenv("MOCK_SIGNER", "0123456789ABCDEF0123456789ABCDEF01234567")
+			if test.swapTarget != "" {
+				trigger := test.swapAfter
+				if trigger == "" {
+					trigger = test.swapTarget
+				}
+				t.Setenv("MOCK_SWAP_AFTER", trigger)
+				t.Setenv("MOCK_SWAP_TARGET", test.swapTarget)
+				t.Setenv("MOCK_SWAP_SOURCE", filepath.Join(directory, "replacement"))
+				t.Setenv("MOCK_SWAPPED_DESCRIPTION", filepath.Join(directory, "swapped-release.json"))
+			}
 
 			fingerprint := "0123456789ABCDEF0123456789ABCDEF01234567"
 			if test.wrongFingerprint {
@@ -251,5 +398,5 @@ func replaceRemoteArtifact(t *testing.T, remote string, fixture releaseFixture, 
 	}
 	before := fmt.Sprintf("%x", sha256.Sum256(original))
 	after := fmt.Sprintf("%x", sha256.Sum256(contents))
-	writeFixtureFile(t, manifestPath, []byte(strings.Replace(string(manifest), before, after, 1)))
+	writeFixtureFile(t, manifestPath, []byte(strings.Replace(string(manifest), before+"  "+name, after+"  "+name, 1)))
 }
