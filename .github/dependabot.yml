@@ -1,6 +1,8 @@
 # See GitHub's documentation for more information on this file:
 # https://docs.github.com/en/code-security/supply-chain-security/keeping-your-dependencies-updated-automatically/configuration-options-for-dependency-updates
 version: 2
+# Hold routine version updates for ecosystem feedback. GitHub does not apply
+# cooldowns to Dependabot security updates, which remain immediate.
 updates:
   # Maintain dependencies for Go modules
   - package-ecosystem: "gomod"
@@ -8,6 +10,8 @@ updates:
     schedule:
       # Check for updates to Go modules every weekday
       interval: "daily"
+    cooldown:
+      default-days: 7
     groups:
       # Group all terraform-plugin-(go|sdk|framework|testing) dependencies together
       "terraform-plugin":
@@ -17,6 +21,8 @@ updates:
     directory: "/tools"
     schedule:
       interval: "daily"
+    cooldown:
+      default-days: 7
   - package-ecosystem: "github-actions"
     directory: "/"
     groups:
@@ -28,3 +34,5 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "Etc/UTC"
+    cooldown:
+      default-days: 7
