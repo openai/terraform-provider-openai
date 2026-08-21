@@ -1,10 +1,10 @@
 {
   "files": {
     ".copywrite.hcl": "0a82bb5c46a9350609674864acb590bdcef14031ffa02b3b2d772da015a72f0f",
-    ".github/workflows/ci.yml": "d41947c7ce64a07d1d9365ea9ab8a3ccd1d7482a4f4c523a905dbd06b77a2117",
+    ".github/workflows/ci.yml": "60527067ca5d369096e22a3b31afb558a17d53b74580aa1acfe99c1cfa708c43",
     ".gitignore": "f0883043c2f2146020cbbee6f578dcbf84175c9f7abb9be23780f802a9c26ef6",
     ".golangci.yml": "eedd431166ed43216006dc37f01c9e3f9282d4b339517ab0a68e946c8d3059d6",
-    "GNUmakefile": "eb7ec1f45cd2839bc9528f5a5e6f4ac3854b530612070584bf43c2ea708e44f0",
+    "GNUmakefile": "8a8be3f7f4f9c7539aad6d090665c8d7f01a1e8144aadd1e2ff8eeeba4f3b77b",
     "docs/data-sources/certificate.md": "05cf4f778f2075c3801cbbc1037e4f88a289b392e9743c7ca98d01a3ce2c7729",
     "docs/data-sources/certificates.md": "67128efc3944e7204bfef9f722794179b66c612cc147a29fc34630187cec1a55",
     "docs/data-sources/group.md": "0d95497256cce2bc52e196f59b43a0a7afefdcc5d57df8058c301bd50d1bd76b",
@@ -163,11 +163,11 @@
     "go.sum": "fbf858b2b9243fe38720eb5e957093a671e78bbbf348e92ec6cc94a01de5f08d",
     "internal/provider/acctest/acceptance.go": "2fe0fa2b9ba52ef5065957fcdc7362980b592dab2915f8cc96a5915323721815",
     "internal/provider/acctest/scenario_acc_test.go": "b2dcbc0e2f1157a394d8b4a6e2f0fe3eaee2e2647e52278df788ef6d7fc9f657",
-    "internal/provider/openaiapi/client.go": "549ed43d4f5cfd5ac3f48d5072cc3cfe26a36bab5fbcb7f155f4e88ca26e156b",
-    "internal/provider/openaiapi/client_test.go": "7faea71d1076d86ada1115035c37e054741f71a8ad6c4296317a7d0facf2a2f3",
+    "internal/provider/openaiapi/client.go": "e9ee43162110d702e238f6d768142f05efae53583f041de67340c2e7e3b6a4c3",
+    "internal/provider/openaiapi/client_test.go": "a6a171741edad909e4ce973cda685b74049a13cfa2278b2c4980df06b1fd81c4",
     "internal/provider/provider.go": "636029f7a61acdf257ce6dc3ec396bf03e4b8b622f43a26355945bef7876a616",
-    "internal/provider/provider_security.go": "4cf807ec2628bc377682920046ad50b5e1c159c4e1cc54d6f077ab7a10e8fad9",
-    "internal/provider/provider_security_test.go": "a23685f54590c715589540baf6ab7bfa792c107d5bb58e2983e5fe893e88c9a4",
+    "internal/provider/provider_security.go": "149a26769d770e3e80a5e6950a74ff27c8ae5c43eb2d17865c2bbf862593cf43",
+    "internal/provider/provider_security_test.go": "72c9ec42470ea6f8e479e02f593e63b2596912132a16978648cbd472f527b3e6",
     "internal/provider/provider_test.go": "3b47db09a56b6a059ceb58be97d1fc0a9c4ffb5ccd11dc38ddccd26b14105466",
     "internal/provider/resources/certificate/data_source_certificate.go": "b14fba17f6b9e9e90b27033801681cb2d94e3b3ec87fcb64fc8303cb0f1a4134",
     "internal/provider/resources/certificate/data_source_certificate_acc_test.go": "bceb3a0f8923b710a8b5e73273ea68d5df77b93d07187f9b8a50a89f3a2a6c2e",
@@ -290,7 +290,7 @@
     "main.go": "bbf7b87127a002ba12400fabede83dfcbfd9d376ab8db85c889f60645011bb2a",
     "templates/index.md.tmpl": "95ab116d95eace26b885217bbfdb35ad6426c4a8d23f2e44570d75b92afc6f05",
     "terraform-registry-manifest.json": "f809ab383cca0a5f83072981c64208cbd7fa67e986a86ee02dd2c82333221e32",
-    "tools/tools.go": "b5d5236b450351f9a86d9ec6904a9f5afe43c77de893c098d2361e8a07eab68e"
+    "tools/tools.go": "1800a8d63e159c397f04d4546c6a25109b7757ea7edef90b02e88257c52c9d31"
   },
   "version": 1
 }

@@ -527,6 +527,27 @@ type retryAfterCooldown struct {
 	releaseGate chan struct{}
 }
 
+func sanitizeRedirectError(response *http.Response, err error) error {
+	if response == nil || err == nil {
+		return err
+	}
+	redirectErr, ok := err.(*url.Error)
+	if !ok {
+		return err
+	}
+	redirectURL, parseErr := url.Parse(redirectErr.URL)
+	if parseErr != nil {
+		return &url.Error{Op: redirectErr.Op, URL: "[redacted]", Err: redirectErr.Err}
+	}
+	sanitizedURL := (&url.URL{
+		Scheme:  redirectURL.Scheme,
+		Host:    redirectURL.Host,
+		Path:    redirectURL.Path,
+		RawPath: redirectURL.RawPath,
+	}).String()
+	return &url.Error{Op: redirectErr.Op, URL: sanitizedURL, Err: redirectErr.Err}
+}
+
 func retryAfterDuration(response *http.Response, now time.Time) (time.Duration, bool) {
 	if response == nil || response.StatusCode != http.StatusTooManyRequests {
 		return 0, false
@@ -861,6 +882,7 @@ func (c *APIClient) requestTelemetryMiddleware(ctx context.Context, method strin
 			attemptRequest = request.Clone(attemptContext)
 		}
 		response, err := next(attemptRequest)
+		err = sanitizeRedirectError(response, err)
 		c.retryAfterCooldown.observeResponse(response, time.Now(), coordinatedCooldown, cooldownGeneration)
 		releaseCooldown()
 		statusCode := 0

@@ -72,6 +72,7 @@ func TestProviderConfigureAPIBaseURL(t *testing.T) {
 		{name: "localhost lookalike origin", baseURL: "http://localhost.example.com/v1", explicit: true, wantErr: true},
 		{name: "relative URL", baseURL: "/v1", explicit: true, wantErr: true},
 		{name: "malformed URL", baseURL: "https://%zz.example.com/v1", explicit: true, wantErr: true},
+		{name: "malformed multi-colon authority", baseURL: "https://example.com:443:444/v1", explicit: true, wantErr: true},
 		{name: "missing URL host", baseURL: "https:///v1", explicit: true, wantErr: true},
 		{name: "empty URL hostname", baseURL: "https://:443/v1", explicit: true, wantErr: true},
 		{name: "zero HTTPS port", baseURL: "https://proxy.example.com:0/v1", explicit: true, wantErr: true},
@@ -185,6 +186,8 @@ func TestProviderRejectedEndpointNeverReceivesAdminCredentials(t *testing.T) {
 }
 
 func TestProviderRedirectNeverSendsAdminCredentialsToAnotherOrigin(t *testing.T) {
+	const rawRedirectCredentials = "example-user:example-password@"
+	const rawRedirectQuery = "?X-Amz-Signature=example-signature&token=example-token#example-fragment"
 	var redirectedRequests atomic.Int32
 	unapprovedServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		redirectedRequests.Add(1)
@@ -197,7 +200,8 @@ func TestProviderRedirectNeverSendsAdminCredentialsToAnotherOrigin(t *testing.T)
 	approvedServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		approvedRequests.Add(1)
 		approvedAuthorization.Store(request.Header.Get("Authorization"))
-		http.Redirect(writer, request, unapprovedServer.URL+"/capture", http.StatusTemporaryRedirect)
+		redirectURL := strings.Replace(unapprovedServer.URL, "://", "://"+rawRedirectCredentials, 1) + "/capture" + rawRedirectQuery
+		http.Redirect(writer, request, redirectURL, http.StatusTemporaryRedirect)
 	}))
 	t.Cleanup(approvedServer.Close)
 
@@ -218,6 +222,21 @@ func TestProviderRedirectNeverSendsAdminCredentialsToAnotherOrigin(t *testing.T)
 	}
 	if strings.Contains(err.Error(), "http: read on closed response body") {
 		t.Fatalf("cross-origin redirect error was replaced while buffering: %v", err)
+	}
+	for _, secret := range []string{
+		"example-user",
+		"example-password",
+		"X-Amz-Signature",
+		"example-signature",
+		"example-token",
+		"example-fragment",
+	} {
+		if strings.Contains(err.Error(), secret) {
+			t.Fatalf("cross-origin redirect error exposed %q: %v", secret, err)
+		}
+	}
+	if !strings.Contains(err.Error(), unapprovedServer.URL+"/capture") {
+		t.Fatalf("cross-origin redirect error lost sanitized destination: %v", err)
 	}
 	if got := approvedRequests.Load(); got != 1 {
 		t.Fatalf("approved redirect origin received %d requests, want 1", got)

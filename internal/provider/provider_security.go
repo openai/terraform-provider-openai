@@ -22,7 +22,7 @@ func validateAPIBaseURL(value string) (*url.URL, error) {
 	}
 
 	endpoint, err := url.Parse(value)
-	if err != nil || !endpoint.IsAbs() || endpoint.Hostname() == "" || endpoint.Opaque != "" {
+	if err != nil || !endpoint.IsAbs() || endpoint.Hostname() == "" || endpoint.Opaque != "" || !validAPIEndpointAuthority(endpoint) {
 		return nil, errors.New("base_url must be an absolute HTTP or HTTPS URL.")
 	}
 	if endpoint.User != nil {
@@ -50,6 +50,17 @@ func validateAPIBaseURL(value string) (*url.URL, error) {
 	default:
 		return nil, errors.New("base_url must use the HTTP or HTTPS scheme.")
 	}
+}
+
+func validAPIEndpointAuthority(endpoint *url.URL) bool {
+	hostname := endpoint.Hostname()
+	if port := endpoint.Port(); port != "" {
+		return strings.EqualFold(endpoint.Host, net.JoinHostPort(hostname, port))
+	}
+	if strings.Contains(hostname, ":") {
+		return strings.EqualFold(endpoint.Host, "["+hostname+"]")
+	}
+	return strings.EqualFold(endpoint.Host, hostname)
 }
 
 func effectiveAPIOriginPort(endpoint *url.URL) int {

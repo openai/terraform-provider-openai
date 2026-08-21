@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"runtime"
 	"strings"
 	"sync"
@@ -258,8 +259,10 @@ func TestReadResponseBodyEnforcesLimitsAndClosesBodies(t *testing.T) {
 	}
 }
 
-func TestRequestMiddlewarePreservesTransportErrorsBeforeBuffering(t *testing.T) {
-	redirectErr := errors.New("redirect crosses the configured OpenAI API origin")
+func TestRequestMiddlewarePreservesAndSanitizesRedirectErrorsBeforeBuffering(t *testing.T) {
+	redirectCause := errors.New("redirect crosses the configured OpenAI API origin")
+	const rawRedirectURL = "https://example-user:example-password@other.example/resource?X-Amz-Signature=example-signature&token=example-token#example-fragment"
+	redirectErr := &url.Error{Op: http.MethodGet, URL: rawRedirectURL, Err: redirectCause}
 	closedBodyErr := errors.New("http: read on closed response body")
 	body := &responseLimitTrackingBody{Reader: iotest.ErrReader(closedBodyErr)}
 	response := &http.Response{
@@ -280,14 +283,62 @@ func TestRequestMiddlewarePreservesTransportErrorsBeforeBuffering(t *testing.T) 
 	if gotResponse != response {
 		t.Fatalf("response = %p, want original response %p", gotResponse, response)
 	}
-	if !errors.Is(gotErr, redirectErr) {
-		t.Fatalf("error = %v, want original redirect error %v", gotErr, redirectErr)
+	if !errors.Is(gotErr, redirectCause) {
+		t.Fatalf("error = %v, want redirect cause %v", gotErr, redirectCause)
 	}
 	if errors.Is(gotErr, closedBodyErr) {
 		t.Fatalf("redirect error was replaced by response-body error: %v", gotErr)
 	}
+	var gotURLError *url.Error
+	if !errors.As(gotErr, &gotURLError) {
+		t.Fatalf("error type = %T, want *url.Error", gotErr)
+	}
+	if gotURLError.URL != "https://other.example/resource" {
+		t.Fatalf("redirect URL = %q, want sanitized URL", gotURLError.URL)
+	}
+	for _, secret := range []string{
+		"example-user",
+		"example-password",
+		"X-Amz-Signature",
+		"example-signature",
+		"example-token",
+		"example-fragment",
+	} {
+		if strings.Contains(gotErr.Error(), secret) {
+			t.Fatalf("redirect error exposed %q: %v", secret, gotErr)
+		}
+	}
+	if redirectErr.URL != rawRedirectURL {
+		t.Fatalf("original redirect error URL mutated to %q", redirectErr.URL)
+	}
 	if body.closed {
 		t.Fatal("errored response body was consumed")
+	}
+}
+
+func TestSanitizeRedirectErrorFallsBackWithoutChangingOtherErrors(t *testing.T) {
+	redirectCause := errors.New("redirect crosses the configured OpenAI API origin")
+	malformedRedirectErr := &url.Error{
+		Op:  http.MethodGet,
+		URL: "https://example-user:example-password@%zz.example/resource?token=example-token",
+		Err: redirectCause,
+	}
+	response := &http.Response{StatusCode: http.StatusTemporaryRedirect}
+
+	gotErr := sanitizeRedirectError(response, malformedRedirectErr)
+	var gotURLError *url.Error
+	if !errors.As(gotErr, &gotURLError) {
+		t.Fatalf("error type = %T, want *url.Error", gotErr)
+	}
+	if gotURLError.URL != "[redacted]" {
+		t.Fatalf("malformed redirect URL = %q, want full redaction", gotURLError.URL)
+	}
+	if !errors.Is(gotErr, redirectCause) {
+		t.Fatalf("error = %v, want redirect cause %v", gotErr, redirectCause)
+	}
+	transportErr := errors.New("dial failed")
+	if got := sanitizeRedirectError(nil, transportErr); got != transportErr {
+		t.Fatalf("non-redirect transport error changed from %v to %v", transportErr, got)
 	}
 }
 
