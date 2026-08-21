@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.1.0](https://github.com/openai/terraform-provider-openai/compare/v1.0.0...v1.1.0) (2026-08-21)
+
+
+### Features
+
+* add organization and project spend limits ([#64](https://github.com/openai/terraform-provider-openai/issues/64)) ([bc100b2](https://github.com/openai/terraform-provider-openai/commit/bc100b20b2bfb66a99f474b30017c2138af62cad))
+
+
+### Bug Fixes
+
+* **ci:** build Go sources for CodeQL ([#75](https://github.com/openai/terraform-provider-openai/issues/75)) ([4abb3a2](https://github.com/openai/terraform-provider-openai/commit/4abb3a227380cb50881a4fd2d54378347def97dc))
+* harden signed release dependency resolution ([#72](https://github.com/openai/terraform-provider-openai/issues/72)) ([5778a57](https://github.com/openai/terraform-provider-openai/commit/5778a578a8212d594e8aaed41705201a0911de91))
+* regenerate provider security hardening ([#77](https://github.com/openai/terraform-provider-openai/issues/77)) ([3cb63a4](https://github.com/openai/terraform-provider-openai/commit/3cb63a4119501f1ceca4f7573427b25c8cf58923))
+* verify release artifact integrity before signing ([#74](https://github.com/openai/terraform-provider-openai/issues/74)) ([82c84d3](https://github.com/openai/terraform-provider-openai/commit/82c84d39f43017838748854a876952a207a9ab3d))
+
+
+### Performance Improvements
+
+* cache bounded project user reads ([#55](https://github.com/openai/terraform-provider-openai/issues/55)) ([74b2673](https://github.com/openai/terraform-provider-openai/commit/74b26730e3b44fd6e1ab1571a71ca745ca38771e))
+
 ## [1.0.0](https://github.com/openai/terraform-provider-openai/compare/v0.7.0...v1.0.0) (2026-07-29)
 
 
