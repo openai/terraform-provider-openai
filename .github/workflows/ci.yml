@@ -146,7 +146,7 @@ jobs:
       - name: Check generated docs
         run: |
           make generate
-          git diff --exit-code -- docs examples
+          git diff --exit-code -- docs examples tools/go.mod tools/go.sum
 
   release-sbom:
     name: Release SBOM

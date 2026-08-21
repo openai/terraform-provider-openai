@@ -38,13 +38,15 @@ type APIClient struct {
 
 	// The following fields are test hooks. Provider operation uses the bounded
 	// defaults below.
-	requestTimeout        time.Duration
-	requestAttemptTimeout time.Duration
-	slowRequestThreshold  time.Duration
-	requestMaxRetries     *int
-	requestObserver       func(requestObservation)
-	paginationObserver    func(paginationObservation)
-	responseCacheObserver func(responseCacheObservation)
+	requestTimeout            time.Duration
+	requestAttemptTimeout     time.Duration
+	slowRequestThreshold      time.Duration
+	maxResponseBytes          int64
+	maxPaginatedResponseBytes int64
+	requestMaxRetries         *int
+	requestObserver           func(requestObservation)
+	paginationObserver        func(paginationObservation)
+	responseCacheObserver     func(responseCacheObservation)
 }
 
 const maxPaginatedPages = 1000
@@ -332,6 +334,74 @@ func (c *APIClient) InvalidateResponseCache(cacheName string, cacheKeyFields []s
 	return nil
 }
 
+const (
+	defaultMaxResponseBytes          int64 = 32 << 20
+	defaultMaxPaginatedResponseBytes int64 = 256 << 20
+)
+
+type paginatedResponseBudgetKey struct{}
+
+type paginatedResponseBudget struct {
+	remaining int64
+}
+
+type responseBodyLimitError struct {
+	scope string
+	limit int64
+}
+
+func (e *responseBodyLimitError) Error() string {
+	return fmt.Sprintf("%s exceeded the %d-byte response size limit", e.scope, e.limit)
+}
+
+func (c *APIClient) effectiveMaxResponseBytes() int64 {
+	if c.maxResponseBytes > 0 {
+		return c.maxResponseBytes
+	}
+	return defaultMaxResponseBytes
+}
+
+func (c *APIClient) effectiveMaxPaginatedResponseBytes() int64 {
+	if c.maxPaginatedResponseBytes > 0 {
+		return c.maxPaginatedResponseBytes
+	}
+	return defaultMaxPaginatedResponseBytes
+}
+
+func (c *APIClient) readResponseBody(ctx context.Context, response *http.Response) (body []byte, err error) {
+	defer func() {
+		if closeErr := response.Body.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
+
+	limit := c.effectiveMaxResponseBytes()
+	var budget *paginatedResponseBudget
+	scope := "OpenAI API response"
+	if response.StatusCode >= http.StatusOK && response.StatusCode < http.StatusMultipleChoices {
+		budget, _ = ctx.Value(paginatedResponseBudgetKey{}).(*paginatedResponseBudget)
+		if budget != nil && budget.remaining < limit {
+			limit = budget.remaining
+			scope = "OpenAI API paginated responses"
+		}
+	}
+	if response.ContentLength > limit {
+		return nil, &responseBodyLimitError{scope: scope, limit: limit}
+	}
+
+	body, err = io.ReadAll(io.LimitReader(response.Body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > limit {
+		return nil, &responseBodyLimitError{scope: scope, limit: limit}
+	}
+	if budget != nil {
+		budget.remaining -= int64(len(body))
+	}
+	return body, nil
+}
+
 func IsNotFound(err error) bool {
 	var apiErr *openai.Error
 	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound
@@ -455,6 +525,27 @@ type retryAfterCooldown struct {
 	generation  uint64
 	releaseOnce sync.Once
 	releaseGate chan struct{}
+}
+
+func sanitizeRedirectError(response *http.Response, err error) error {
+	if response == nil || err == nil {
+		return err
+	}
+	redirectErr, ok := err.(*url.Error)
+	if !ok {
+		return err
+	}
+	redirectURL, parseErr := url.Parse(redirectErr.URL)
+	if parseErr != nil {
+		return &url.Error{Op: redirectErr.Op, URL: "[redacted]", Err: redirectErr.Err}
+	}
+	sanitizedURL := (&url.URL{
+		Scheme:  redirectURL.Scheme,
+		Host:    redirectURL.Host,
+		Path:    redirectURL.Path,
+		RawPath: redirectURL.RawPath,
+	}).String()
+	return &url.Error{Op: redirectErr.Op, URL: sanitizedURL, Err: redirectErr.Err}
 }
 
 func retryAfterDuration(response *http.Response, now time.Time) (time.Duration, bool) {
@@ -791,6 +882,7 @@ func (c *APIClient) requestTelemetryMiddleware(ctx context.Context, method strin
 			attemptRequest = request.Clone(attemptContext)
 		}
 		response, err := next(attemptRequest)
+		err = sanitizeRedirectError(response, err)
 		c.retryAfterCooldown.observeResponse(response, time.Now(), coordinatedCooldown, cooldownGeneration)
 		releaseCooldown()
 		statusCode := 0
@@ -799,16 +891,15 @@ func (c *APIClient) requestTelemetryMiddleware(ctx context.Context, method strin
 			statusCode = response.StatusCode
 			responseBytes = response.ContentLength
 		}
-		if method == http.MethodGet && response != nil && response.Body != nil {
-			responseBody, bodyErr := io.ReadAll(response.Body)
+		if err == nil && method == http.MethodGet && response != nil && response.Body != nil {
+			responseBody, bodyErr := c.readResponseBody(attemptContext, response)
 			responseBytes = int64(len(responseBody))
-			closeErr := response.Body.Close()
-			if bodyErr == nil {
-				bodyErr = closeErr
-			}
 			if bodyErr != nil {
 				err = bodyErr
-				if !responseMetadataControlsRetry(response) {
+				var limitErr *responseBodyLimitError
+				if errors.As(bodyErr, &limitErr) {
+					response.Header.Set("x-should-retry", "false")
+				} else if !responseMetadataControlsRetry(response) {
 					response = nil
 				}
 			} else {
@@ -981,6 +1072,9 @@ func (c *APIClient) PaginatedRequest(ctx context.Context, method string, path st
 	if method != http.MethodGet {
 		return c.Request(ctx, method, path, pathParams, queryParams, nil)
 	}
+	ctx = context.WithValue(ctx, paginatedResponseBudgetKey{}, &paginatedResponseBudget{
+		remaining: c.effectiveMaxPaginatedResponseBytes(),
+	})
 	ctx = openAIClientLogContext(ctx)
 	startedAt := time.Now()
 	observation := paginationObservation{

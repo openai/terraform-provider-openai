@@ -122,15 +122,20 @@ func (p *OpenAIProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		client.Project = value
 	}
 
-	if client.BaseURL = strings.TrimSpace(client.BaseURL); client.BaseURL == "" {
-		resp.Diagnostics.AddError("Invalid OpenAI API base URL", "base_url must not be empty.")
+	client.BaseURL = strings.TrimSpace(client.BaseURL)
+	apiEndpoint, err := validateAPIBaseURL(client.BaseURL)
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid OpenAI API base URL", err.Error())
 		return
 	}
 	if strings.TrimSpace(client.AdminAPIKey) == "" {
 		resp.Diagnostics.AddError("Missing OpenAI API key", "Set admin_api_key, OPENAI_ADMIN_KEY.")
 		return
 	}
-	options := []option.RequestOption{option.WithBaseURL(client.BaseURL)}
+	options := []option.RequestOption{
+		option.WithBaseURL(client.BaseURL),
+		option.WithHTTPClient(newCredentialAudienceHTTPClient(apiEndpoint)),
+	}
 	apiKey := strings.TrimSpace(client.AdminAPIKey)
 	if apiKey != "" {
 		options = append(options, option.WithAPIKey(apiKey))
