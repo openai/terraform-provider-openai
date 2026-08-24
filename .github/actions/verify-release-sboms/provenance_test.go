@@ -21,15 +21,10 @@ func TestProductionReleaseRequiresVerifiedArtifactProvenance(t *testing.T) {
 	if publishStart < 0 {
 		t.Fatal("production publishing job was not found")
 	}
-	preflight, publish := workflow[:publishStart], workflow[publishStart:]
+	publish := workflow[publishStart:]
 
 	t.Run("protected publishing job owns attestation permissions", func(t *testing.T) {
-		if strings.Contains(preflight, "id-token: write") || strings.Contains(preflight, "attestations: write") {
-			t.Fatal("release preflight can issue OIDC tokens or create artifact attestations")
-		}
-
-		permissions := regexp.MustCompile(`(?m)^    environment: publish\n    permissions:\n      attestations: write\n      contents: write\n      id-token: write\n`)
-		if !permissions.MatchString(publish) {
+		if !hasExclusiveReleaseProvenancePermissions(workflow) {
 			t.Fatal("approved publishing job does not exclusively own its required release and provenance permissions")
 		}
 	})
@@ -65,4 +60,127 @@ func TestProductionReleaseRequiresVerifiedArtifactProvenance(t *testing.T) {
 			remaining = remaining[index+len(step):]
 		}
 	})
+}
+
+func TestReleaseProvenanceRejectsUnprotectedPermissionGrants(t *testing.T) {
+	t.Parallel()
+
+	protected := "jobs:\n" +
+		"  goreleaser:\n" +
+		"    environment: publish\n" +
+		"    permissions:\n" +
+		"      attestations: write\n" +
+		"      contents: write\n" +
+		"      id-token: write\n"
+	unprotected := "  unapproved:\n" +
+		"    permissions:\n" +
+		"      attestations: write\n" +
+		"      id-token: write\n"
+
+	tests := []struct {
+		name     string
+		workflow string
+		allowed  bool
+	}{
+		{name: "only protected publishing job", workflow: protected, allowed: true},
+		{
+			name:     "workflow-wide OIDC permission",
+			workflow: "permissions:\n  id-token: write\n" + protected,
+		},
+		{
+			name:     "workflow-wide attestation permission",
+			workflow: "permissions:\n  attestations: write\n" + protected,
+		},
+		{
+			name:     "workflow-wide write-all permissions",
+			workflow: "permissions: write-all\n" + protected,
+		},
+		{
+			name:     "quoted workflow-wide write-all permissions",
+			workflow: "permissions: 'write-all' # all workflow permissions\n" + protected,
+		},
+		{
+			name:     "quoted workflow-wide write-all permission key",
+			workflow: "\"permissions\": \"write-all\"\n" + protected,
+		},
+		{
+			name:     "unapproved preceding job",
+			workflow: strings.Replace(protected, "  goreleaser:\n", unprotected+"  goreleaser:\n", 1),
+		},
+		{
+			name: "unapproved preceding write-all job",
+			workflow: strings.Replace(protected, "  goreleaser:\n",
+				"  unapproved:\n    permissions: write-all\n  goreleaser:\n", 1),
+		},
+		{
+			name:     "unapproved following job",
+			workflow: protected + unprotected,
+		},
+		{
+			name: "unapproved following job with aligned permissions",
+			workflow: protected + "  unapproved:\n" +
+				"    permissions:\n" +
+				"      id-token:    write\n" +
+				"      attestations:    write\n",
+		},
+		{
+			name: "unapproved following job with quoted permissions",
+			workflow: protected + "  unapproved:\n" +
+				"    permissions:\n" +
+				"      'id-token': \"write\"\n" +
+				"      \"attestations\": 'write'\n",
+		},
+		{
+			name: "unapproved following job with inline permissions",
+			workflow: protected + "  unapproved:\n" +
+				"    permissions: {id-token: write, attestations: write}\n",
+		},
+		{
+			name:     "unapproved following write-all job",
+			workflow: protected + "  unapproved:\n    permissions: write-all\n",
+		},
+		{
+			name: "unapproved following write-all job with quoted permission key",
+			workflow: protected + "  unapproved:\n" +
+				"    'permissions': 'write-all'\n",
+		},
+		{
+			name:     "unprotected publishing environment",
+			workflow: strings.Replace(protected, "environment: publish", "environment: staging", 1),
+		},
+		{
+			name:     "missing OIDC permission",
+			workflow: strings.Replace(protected, "id-token: write", "id-token: read", 1),
+		},
+		{
+			name:     "missing attestation permission",
+			workflow: strings.Replace(protected, "attestations: write", "attestations: read", 1),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if allowed := hasExclusiveReleaseProvenancePermissions(test.workflow); allowed != test.allowed {
+				t.Fatalf("release provenance permissions allowed = %t, want %t", allowed, test.allowed)
+			}
+		})
+	}
+}
+
+func hasExclusiveReleaseProvenancePermissions(workflow string) bool {
+	writeAll := regexp.MustCompile(`(?m)^[ \t]*["']?permissions["']?[ \t]*:[ \t]*["']?write-all["']?[ \t]*(?:#.*)?$`)
+	if writeAll.MatchString(workflow) {
+		return false
+	}
+
+	for _, permission := range []string{"id-token", "attestations"} {
+		grant := regexp.MustCompile(`(?m)(?:^|[,{])[ \t]*["']?` + regexp.QuoteMeta(permission) +
+			`["']?[ \t]*:[ \t]*["']?write["']?[ \t]*(?:[,}]|#.*|$)`)
+		if len(grant.FindAllStringIndex(workflow, -1)) != 1 {
+			return false
+		}
+	}
+
+	protected := regexp.MustCompile(`(?m)^    environment: publish\n    permissions:\n      attestations: write\n      contents: write\n      id-token: write\n`)
+	return protected.MatchString(workflow)
 }
