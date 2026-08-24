@@ -47,7 +47,7 @@ To publish a provider version:
    git push origin v0.1.0
    ```
 
-The `Release` workflow waits for the `publish` environment checks, imports the GPG key from environment secrets, and runs GoReleaser. GoReleaser builds OS/architecture zip files, generates an SPDX JSON software bill of materials (SBOM) for each zip, includes the SBOMs in the signed checksum file, includes `terraform-registry-manifest.json`, and creates the GitHub Release.
+The `Release` workflow waits for the `publish` environment checks, imports the GPG key from environment secrets, and runs GoReleaser. GoReleaser builds OS/architecture zip files, generates an SPDX JSON software bill of materials (SBOM) for each zip, includes the SBOMs in the signed checksum file, includes `terraform-registry-manifest.json`, and creates a draft GitHub Release. The approved publishing job then generates GitHub OIDC-backed build-provenance attestations for every artifact in the verified, signed checksum file, including each provider archive, SBOM, and registry manifest. It verifies every provider archive's attestation against this repository, release workflow, version tag, and source commit before publishing the draft. A missing, invalid, or mismatched attestation blocks publication.
 
 CI builds a snapshot release and verifies that every provider zip has a non-empty SBOM listed in the checksum file. The tag-triggered `Release` workflow runs the same `Release SBOM` verification before its publish job, so a release cannot be published if that check fails. Both the snapshot and publish jobs first verify their own checked-out provider dependencies before building artifacts.
 
@@ -55,7 +55,7 @@ Once the public Terraform Registry is connected to the public repository, finali
 
 ## Release Security
 
-The `publish` environment approval is the security boundary for release signing. Before approving a release job, reviewers should verify that the tag points at the intended reviewed commit and that the release workflow and `.goreleaser.yml` at that commit are expected.
+The `publish` environment approval is the security boundary for release signing and OIDC-backed provenance. Before approving a release job, reviewers should verify that the tag points at the intended reviewed commit and that the release workflow and `.goreleaser.yml` at that commit are expected. Only this approved job receives `id-token: write` and `attestations: write`; the preceding snapshot-verification job remains read-only. Terraform Registry still requires GPG-signed provider checksums, so the GitHub attestation supplements rather than replaces the GPG signature.
 
 Each release job first installs pinned GoReleaser and Syft release archives and authenticates each archive against a SHA-256 digest committed in `.github/actions/setup-release-tools/install.sh`. Tool installation fails closed if an archive cannot be downloaded, does not match its reviewed digest, or does not contain the expected executable; no mutable upstream installers or unauthenticated tool caches are used.
 
