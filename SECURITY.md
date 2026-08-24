@@ -30,3 +30,24 @@ Please coordinate respectfully with OpenAI's security team.
 
 Please follow OpenAI's coordinated vulnerability disclosure policy:
 https://openai.com/policies/coordinated-vulnerability-disclosure-policy
+
+## Verifying release provenance
+
+Terraform verifies the GPG-signed provider checksum when installing from the
+Terraform Registry. Provider release archives also carry GitHub artifact
+attestations linking their SHA-256 digests to this repository's protected
+release workflow and the corresponding version tag.
+
+After downloading a provider archive, verify its build provenance with the
+GitHub CLI:
+
+```sh
+version=1.2.3
+gh attestation verify "terraform-provider-openai_${version}_linux_amd64.zip" \
+  --repo openai/terraform-provider-openai \
+  --signer-workflow openai/terraform-provider-openai/.github/workflows/release.yml \
+  --source-ref "refs/tags/v${version}"
+```
+
+Set `version` to the downloaded provider version and choose the archive for the
+appropriate operating system and architecture.
