@@ -8,6 +8,15 @@ Do not report security vulnerabilities through public GitHub issues, pull reques
 
 This policy applies to the OpenAI Terraform Provider and its release artifacts. For security issues in OpenAI services or other OpenAI products, use the same OpenAI disclosure process.
 
+## Threat model authority
+
+The repository's single canonical detailed threat model is
+[docs/architecture/security-model.md](docs/architecture/security-model.md).
+Use that document for system scope, trust boundaries, attacker capabilities,
+security invariants, and severity calibration. This file is intentionally
+limited to disclosure, reportability, and release-provenance guidance; it does
+not define a competing threat model.
+
 ## What to include
 
 Please include:
