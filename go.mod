@@ -7,7 +7,7 @@ require (
 	github.com/hashicorp/terraform-plugin-go v0.31.0
 	github.com/hashicorp/terraform-plugin-log v0.11.0
 	github.com/hashicorp/terraform-plugin-testing v1.16.0
-	github.com/openai/openai-go/v3 v3.51.0
+	github.com/openai/openai-go/v3 v3.54.0
 	golang.org/x/net v0.58.0
 )
 
