@@ -6,19 +6,68 @@ Thank you for helping improve the `openai/openai` Terraform provider. Read
 artifacts. The repository's [CODEOWNERS](.github/CODEOWNERS) identify the SDK
 maintainers responsible for review.
 
-## Development and generated code
+## Where contributions land
+
+Provider pull requests from maintainers and collaborators land in this public
+repository. Its `main` branch is the reviewed source for provider changes and
+releases. Repository policy currently limits pull-request creation to
+collaborators; external contributors should open a non-security issue describing
+the proposed change so a maintainer can coordinate it. Report vulnerabilities
+privately as described in [SECURITY.md](SECURITY.md), not through an issue.
+
+An internal repository is intended to receive a one-way operational mirror of
+public `main`; it is not a separate contribution surface, and pull requests
+opened there are not imported back here. A checked-in mirror configuration does
+not by itself prove that the mirror is deployed or current.
+
+Repository mirroring and provider generation are independent. Mirroring copies
+an already-reviewed public Git commit; it does not regenerate provider code.
+
+## Development and file ownership
 
 Use the Go version declared in `go.mod` and a supported Terraform CLI. Review
 dependency origins before downloading modules or running generator, install, or
 release tooling.
 
-Most provider implementation, resource tests, Terraform examples, and generated
-documentation are owned by the upstream generator. Consult
-`.terraform-generator-manifest.json` and `Code generated ... DO NOT EDIT`
-headers before editing. Prefer a change to the authoritative generator or
-upstream source; do not hand-edit generated files without coordinating with the
-maintainers. `make generate` refreshes provider documentation from the current
-provider and examples; it does not regenerate the provider implementation.
+Before editing a file, consult `.terraform-generator-manifest.json` and any
+`Code generated ... DO NOT EDIT` header:
+
+- Files listed in the manifest are generator-owned. This includes most provider
+  implementation, resource tests, Terraform examples, and generated
+  documentation. Do not hand-edit them as the durable fix.
+- `.terraform-generator-manifest.json` is itself generator-maintained and is
+  rewritten by incremental generation; do not edit its ownership set or hashes
+  by hand even though it cannot list itself.
+- Other files absent from the manifest and without a generated header are
+  maintained in this repository. Changes to those files can be proposed
+  directly here, subject to `CODEOWNERS` review.
+
+The provider uses a purpose-built Terraform generator in the OpenAI monorepo,
+not Castiron. For a generator-owned change, external contributors should open a
+non-security issue here and coordinate with `@openai/sdks-team`; an OpenAI
+maintainer will make the authoritative generator or input change and regenerate
+the provider.
+
+For maintainers, the authoritative generator lives under
+[`project/terraform-generator`](https://github.com/openai/openai/tree/master/project/terraform-generator).
+The update flow is:
+
+1. Change and test the generator, provider config, templates, handwritten API
+   reference sources, or owning service declarations for generated public
+   OpenAPI JSON in the monorepo.
+2. If needed, run `prepare_openapi_input.py` to materialize the local untracked
+   OpenAPI bundle. This preparation step does not generate or publish a provider.
+3. Run the generator incrementally against a linked checkout of this repository.
+4. Review the generated files and `.terraform-generator-manifest.json`, run the
+   configured quality checks and provider tests, and submit the provider diff as
+   a pull request here.
+5. Merge the reviewed public provider change. Repository mirroring, when
+   deployed and verified by its operators, subsequently makes the exact public
+   `main` commit available in the internal mirror.
+
+`make generate` only refreshes provider documentation from the current provider
+and examples. It does not run the upstream generator or regenerate the provider
+implementation.
 
 ## Security requirements
 

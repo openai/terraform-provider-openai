@@ -5,7 +5,10 @@ This repository uses a two-stage release process:
 1. `release-please` creates and updates a release PR from Conventional Commits.
 2. A maintainer publishes provider artifacts through the protected `publish` environment.
 
-The release PR updates `CHANGELOG.md` and `.release-please-manifest.json`. While this repository is private and prelaunch, the release-please workflow intentionally uses `skip-github-release: true`; it does not create tags or GitHub Releases automatically.
+The release PR updates `CHANGELOG.md` and `.release-please-manifest.json`. The
+release-please workflow intentionally uses `skip-github-release: true`; it does
+not create tags or GitHub Releases automatically. Artifact publication remains
+an explicit, protected tag-triggered step.
 
 ## Provider Name
 
@@ -22,7 +25,11 @@ terraform {
 }
 ```
 
-For public Terraform Registry publishing, the repository should be public and named `terraform-provider-openai`. Until then, test the provider through a local development override, a filesystem mirror, or an HCP Terraform private registry.
+This repository is public, has the `terraform-provider-openai` name required
+for public Terraform Registry publishing, and publishes under the durable
+`openai/openai` address. Test unreleased provider changes through a local
+development override, a filesystem mirror, or an HCP Terraform private
+registry.
 
 ## Publishing Artifacts
 
@@ -51,7 +58,8 @@ The `Release` workflow waits for the `publish` environment checks, imports the G
 
 CI builds a snapshot release and verifies that every provider zip has a non-empty SBOM listed in the checksum file. The tag-triggered `Release` workflow runs the same `Release SBOM` verification before its publish job, so a release cannot be published if that check fails. Both the snapshot and publish jobs first verify their own checked-out provider dependencies before building artifacts.
 
-Once the public Terraform Registry is connected to the public repository, finalized GitHub Releases are ingested by the Registry.
+The public Terraform Registry is connected to this repository and ingests
+finalized GitHub Releases.
 
 ## Release Security
 
