@@ -41,6 +41,8 @@ func TestProductionReleaseRequiresVerifiedArtifactProvenance(t *testing.T) {
 			`echo "checksums=dist/terraform-provider-openai_${GITHUB_REF_NAME#v}_SHA256SUMS" >> "$GITHUB_OUTPUT"`,
 			"      - name: Attest verified release artifacts\n",
 			"          subject-checksums: ${{ steps.goreleaser.outputs.checksums }}\n",
+			"      - name: Attest verified SBOMs\n",
+			"          subject-checksums: ${{ steps.goreleaser.outputs.sbom-checksums }}\n",
 			"      - name: Verify provider archive attestations\n",
 			"          for archive in dist/*.zip; do\n",
 			`gh attestation verify "$archive"`,

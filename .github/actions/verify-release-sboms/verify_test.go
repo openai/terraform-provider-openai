@@ -426,7 +426,7 @@ func TestSigningRequiresVerifiedProductionArtifacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GPG was not invoked for valid production artifacts: %v", err)
 	}
-	want := "--batch\n--detach-sign\n-\n"
+	want := "--output\n" + strings.TrimSuffix(valid.manifest, "_SHA256SUMS") + "_sbom_checksums.txt.sig\n--batch\n--detach-sign\n-\n"
 	if string(got) != want {
 		t.Fatalf("GPG arguments = %q, want %q", got, want)
 	}
@@ -447,6 +447,10 @@ func TestSigningBindsVerifiedChecksumSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	verified, _, err = splitReleaseChecksums(verified)
+	if err != nil {
+		t.Fatal(err)
+	}
 	forged := strings.Replace(string(verified), fmt.Sprintf("%x", sha256.Sum256(archive)), strings.Repeat("0", 64), 1)
 	forgedPath := filepath.Join(directory, "forged-checksums")
 	signedPath := filepath.Join(directory, "signed-checksums")
@@ -454,6 +458,7 @@ func TestSigningBindsVerifiedChecksumSnapshot(t *testing.T) {
 
 	gpg := filepath.Join(directory, "gpg")
 	writeFixtureFile(t, gpg, []byte("#!/bin/sh\n"+
+		"if [ \"$1\" = --output ]; then cat > \"$2\"; exit; fi\n"+
 		"mv \"$FORGED_CHECKSUMS\" \"$PUBLISHED_CHECKSUMS\"\n"+
 		"for argument in \"$@\"; do target=\"$argument\"; done\n"+
 		"if [ \"$target\" = - ]; then cat > \"$SIGNED_CHECKSUMS\"; else cat \"$target\" > \"$SIGNED_CHECKSUMS\"; fi\n"))
@@ -536,7 +541,7 @@ func TestSigningRestoresValidatedArtifactSnapshots(t *testing.T) {
 			record := filepath.Join(directory, "gpg-invocation")
 			gpg := filepath.Join(directory, "gpg")
 			writeFixtureFile(t, gpg, []byte("#!/bin/sh\n"+
-				"mv \"$MALFORMED_ARTIFACT\" \"$PUBLISHED_ARTIFACT\"\n"+
+				"cp \"$MALFORMED_ARTIFACT\" \"$PUBLISHED_ARTIFACT\"\n"+
 				"cat > /dev/null\nprintf 'signed\\n' > \"$SIGNING_RECORD\"\n"))
 			if err := os.Chmod(gpg, 0o755); err != nil {
 				t.Fatal(err)
@@ -679,6 +684,10 @@ func TestProductionReleaseUsesVerifiedSigner(t *testing.T) {
 	signer := regexp.MustCompile(`(?m)^signs:\n  - artifacts: checksum\n    cmd: release-verifier\n    args:\n      - "\$\{artifact\}"\n      - --sign\n`)
 	if !signer.Match(configuration) {
 		t.Fatal("GoReleaser production checksum signing does not use the trusted prebuilt verifier")
+	}
+	if !strings.Contains(string(configuration), "archives:\n- id: provider-packages\n") ||
+		!strings.Contains(string(configuration), "  ids:\n    - provider-packages\n") {
+		t.Fatal("GoReleaser checksum refresh must select provider archives without SBOMs")
 	}
 
 	workflow, err := os.ReadFile(filepath.Join(repository, ".github", "workflows", "release.yml"))

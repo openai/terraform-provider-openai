@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -43,6 +44,10 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	manifest, err = completeSBOMChecksums(args[0], manifest)
+	if err != nil {
+		return err
+	}
 	var artifacts []verifiedArtifact
 	if err := verifyReleaseSnapshot(args[0], manifest, &artifacts); err != nil {
 		return err
@@ -51,21 +56,104 @@ func run(args []string) error {
 		return nil
 	}
 
+	registryChecksums, sbomChecksums, err := splitReleaseChecksums(manifest)
+	if err != nil {
+		return err
+	}
+	sbomPath := strings.TrimSuffix(args[0], "_SHA256SUMS") + "_sbom_checksums.txt"
 	signingArguments := append([]string(nil), args[2:]...)
 	signingArguments[len(signingArguments)-1] = "-"
-	sign := exec.Command("gpg", signingArguments...)
-	sign.Stdin = bytes.NewReader(manifest)
-	sign.Stdout = os.Stdout
-	sign.Stderr = os.Stderr
-	if err := sign.Run(); err != nil {
-		return fmt.Errorf("sign verified checksum manifest: %w", err)
+	if err := signChecksumSnapshot(registryChecksums, signingArguments); err != nil {
+		return err
+	}
+	// GoReleaser supplies --output for the Registry signature. The second
+	// signature must have its own destination, including in standalone calls.
+	sbomArguments := append([]string(nil), signingArguments...)
+	outputFound := false
+	for i := 0; i < len(sbomArguments)-1; i++ {
+		if sbomArguments[i] == "--output" {
+			sbomArguments[i+1] = sbomPath + ".sig"
+			outputFound = true
+			break
+		}
+	}
+	if !outputFound {
+		sbomArguments = append([]string{"--output", sbomPath + ".sig"}, sbomArguments...)
+	}
+	if err := signChecksumSnapshot(sbomChecksums, sbomArguments); err != nil {
+		return err
 	}
 	for _, artifact := range artifacts {
 		if err := publishVerifiedSnapshot(artifact.path, artifact.contents, artifact.mode); err != nil {
 			return fmt.Errorf("publish verified release artifact %q: %w", artifact.name, err)
 		}
 	}
-	return publishVerifiedSnapshot(args[0], manifest, mode)
+	if err := publishVerifiedSnapshot(sbomPath, sbomChecksums, mode); err != nil {
+		return err
+	}
+	return publishVerifiedSnapshot(args[0], registryChecksums, mode)
+}
+
+// completeSBOMChecksums adds adjacent SBOM snapshots to a Registry-only input.
+// The complete inventory still undergoes checksum and semantic validation before
+// signing. Preserve legacy full inventories so partial omissions remain errors.
+func completeSBOMChecksums(checksumPath string, manifest []byte) ([]byte, error) {
+	checksums, err := readChecksums(manifest)
+	if err != nil {
+		return nil, err
+	}
+	var archives []string
+	for name := range checksums {
+		if strings.HasSuffix(name, ".spdx.json") {
+			return manifest, nil
+		}
+		if strings.HasSuffix(name, ".zip") {
+			archives = append(archives, name)
+		}
+	}
+	sort.Strings(archives)
+	var complete bytes.Buffer
+	complete.Write(manifest)
+	if len(manifest) > 0 && manifest[len(manifest)-1] != '\n' {
+		complete.WriteByte('\n')
+	}
+	for _, archive := range archives {
+		name := archive + ".spdx.json"
+		contents, _, err := readArtifactSnapshot(filepath.Join(filepath.Dir(checksumPath), name))
+		if err != nil {
+			return nil, fmt.Errorf("snapshot SBOM %q: %w", name, err)
+		}
+		fmt.Fprintf(&complete, "%x  %s\n", sha256.Sum256(contents), name)
+	}
+	return complete.Bytes(), nil
+}
+
+// splitReleaseChecksums is called only after the complete release inventory has
+// been verified. Registry ingestion accepts ZIPs and its manifest, but not SBOMs.
+func splitReleaseChecksums(manifest []byte) ([]byte, []byte, error) {
+	if _, err := readChecksums(manifest); err != nil {
+		return nil, nil, err
+	}
+	var registry, sboms bytes.Buffer
+	for _, line := range strings.Split(strings.TrimSuffix(string(manifest), "\n"), "\n") {
+		if strings.HasSuffix(line, ".spdx.json") {
+			fmt.Fprintln(&sboms, line)
+		} else {
+			fmt.Fprintln(&registry, line)
+		}
+	}
+	return registry.Bytes(), sboms.Bytes(), nil
+}
+
+func signChecksumSnapshot(manifest []byte, arguments []string) error {
+	sign := exec.Command("gpg", arguments...)
+	sign.Stdin = bytes.NewReader(manifest)
+	sign.Stdout = os.Stdout
+	sign.Stderr = os.Stderr
+	if err := sign.Run(); err != nil {
+		return fmt.Errorf("sign verified checksum manifest: %w", err)
+	}
+	return nil
 }
 
 func verifyRelease(checksumPath string) error {
@@ -487,28 +575,43 @@ func publishReleaseDraft(tag, fingerprint string) error {
 		return err
 	}
 	releaseName := "terraform-provider-openai_" + strings.TrimPrefix(tag, "v")
-	checksumName := releaseName + "_SHA256SUMS"
-	signatureName := checksumName + ".sig"
-	for _, name := range []string{checksumName, signatureName} {
-		if _, exists := assets[name]; !exists {
-			return fmt.Errorf("missing signed checksum artifact %q", name)
+	checksums := make(map[string][]byte)
+	for _, suffix := range []string{"_SHA256SUMS", "_sbom_checksums.txt"} {
+		checksumName := releaseName + suffix
+		signatureName := checksumName + ".sig"
+		for _, name := range []string{checksumName, signatureName} {
+			if _, exists := assets[name]; !exists {
+				return fmt.Errorf("missing signed checksum artifact %q", name)
+			}
 		}
-	}
-
-	manifest, err := downloadReleaseAsset(tag, assets[checksumName])
-	if err != nil {
-		return err
-	}
-	signature, err := downloadReleaseAsset(tag, assets[signatureName])
-	if err != nil {
-		return err
-	}
-	if err := verifyReleaseSignature(manifest, signature, fingerprint); err != nil {
-		return err
-	}
-	checksums, err := readChecksums(manifest)
-	if err != nil {
-		return err
+		manifest, err := downloadReleaseAsset(tag, assets[checksumName])
+		if err != nil {
+			return err
+		}
+		signature, err := downloadReleaseAsset(tag, assets[signatureName])
+		if err != nil {
+			return err
+		}
+		if err := verifyReleaseSignature(manifest, signature, fingerprint); err != nil {
+			return err
+		}
+		entries, err := readChecksums(manifest)
+		if err != nil {
+			return err
+		}
+		for name, digest := range entries {
+			if suffix == "_sbom_checksums.txt" {
+				if !strings.HasSuffix(name, ".zip.spdx.json") {
+					return fmt.Errorf("unexpected SBOM checksum entry %q", name)
+				}
+			} else if !strings.HasSuffix(name, ".zip") && name != releaseName+"_manifest.json" {
+				return fmt.Errorf("unexpected Registry checksum entry %q", name)
+			}
+			if _, exists := checksums[name]; exists {
+				return fmt.Errorf("duplicate release checksum entry %q", name)
+			}
+			checksums[name] = digest
+		}
 	}
 	if err := verifyDraftArtifacts(tag, releaseName, assets, checksums); err != nil {
 		return err
@@ -577,9 +680,10 @@ func verifyDraftArtifacts(tag, releaseName string, assets map[string]releaseAsse
 	registryName := releaseName + "_manifest.json"
 	checksumName := releaseName + "_SHA256SUMS"
 	signatureName := checksumName + ".sig"
-	verified := make(map[string][]byte, len(assets)-2)
+	sbomChecksumName := releaseName + "_sbom_checksums.txt"
+	verified := make(map[string][]byte, len(assets))
 	for name, asset := range assets {
-		if name == checksumName || name == signatureName {
+		if name == checksumName || name == signatureName || name == sbomChecksumName || name == sbomChecksumName+".sig" {
 			continue
 		}
 		if name != registryName && !strings.HasSuffix(name, ".zip") && !strings.HasSuffix(name, ".spdx.json") {
@@ -631,7 +735,7 @@ func verifyDraftArtifacts(tag, releaseName string, assets map[string]releaseAsse
 	if _, exists := assets[registryName]; !exists {
 		return fmt.Errorf("uploaded release has no Terraform Registry manifest %q", registryName)
 	}
-	if archives == 0 || archives != sboms || len(checksums) != len(assets)-2 {
+	if archives == 0 || archives != sboms || len(checksums) != len(assets)-4 {
 		return fmt.Errorf("uploaded release has an incomplete signed artifact set: archives=%d SBOMs=%d checksums=%d", archives, sboms, len(checksums))
 	}
 	return verifyCompleteReleasePlatforms(releaseName, func(name string) bool {
