@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.1](https://github.com/openai/terraform-provider-openai/compare/v1.1.0...v1.1.1) (2026-09-15)
+
+
+### Bug Fixes
+
+* attest Terraform provider release artifacts ([#81](https://github.com/openai/terraform-provider-openai/issues/81)) ([abbd24d](https://github.com/openai/terraform-provider-openai/commit/abbd24d3eaf4e0d47c466ff84cc1a0d86c90fe58))
+* **ci:** build Go sources for CodeQL ([#75](https://github.com/openai/terraform-provider-openai/issues/75)) ([4abb3a2](https://github.com/openai/terraform-provider-openai/commit/4abb3a227380cb50881a4fd2d54378347def97dc))
+* harden signed release dependency resolution ([#72](https://github.com/openai/terraform-provider-openai/issues/72)) ([5778a57](https://github.com/openai/terraform-provider-openai/commit/5778a578a8212d594e8aaed41705201a0911de91))
+* reconcile and automate release tracking ([#97](https://github.com/openai/terraform-provider-openai/issues/97)) ([75ac357](https://github.com/openai/terraform-provider-openai/commit/75ac357a7aacb99acd3c49f1ee9ab9719168ba1c))
+* regenerate provider security hardening ([#77](https://github.com/openai/terraform-provider-openai/issues/77)) ([3cb63a4](https://github.com/openai/terraform-provider-openai/commit/3cb63a4119501f1ceca4f7573427b25c8cf58923))
+* verify release artifact integrity before signing ([#74](https://github.com/openai/terraform-provider-openai/issues/74)) ([82c84d3](https://github.com/openai/terraform-provider-openai/commit/82c84d39f43017838748854a876952a207a9ab3d))
+
 ## [1.1.0](https://github.com/openai/terraform-provider-openai/compare/v1.0.0...v1.1.0) (2026-08-13)
 
 ### Features
