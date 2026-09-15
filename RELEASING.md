@@ -46,13 +46,35 @@ The `publish` environment must define these environment secrets:
 
 To publish a provider version:
 
-1. Merge the release-please PR.
-2. Push a semver tag:
+1. Verify the release PR's title, changelog, and manifest agree on a version
+   that has not already been published, then merge the reviewed release-please PR.
+2. Tag that exact merge commit with its manifest version, rather than tagging
+   whatever commit happens to be checked out. For example, for a release PR
+   recording version `1.1.1`, substitute its verified full merge SHA below:
 
    ```sh
-   git tag v0.1.0
-   git push origin v0.1.0
+   git tag v1.1.1 <release-pr-merge-sha>
+   git push origin v1.1.1
    ```
+
+Before building release artifacts, the workflow requires the tag to match the
+committed manifest and changelog and to point at the matching merged release PR
+in public `main`. A mismatch fails before signing credentials are accessed.
+
+Release-please uses `autorelease: pending` to discover and update release PRs;
+keep labeling enabled. After the protected publication job succeeds, a separate
+job verifies that the release is public and replaces that PR's pending label
+with `autorelease: tagged`, preserving unrelated labels. This job has no signing
+credentials. Failed publication retains pending status and blocks another
+release PR. If label completion fails after successful publication, rerun only
+the failed job; completion is idempotent. Do not rerun the successful publication
+job or move an existing version tag. The next push to `main` lets release-please
+prepare subsequent changes once pending status has cleared.
+
+If an already-published version is missing from the manifest or changelog,
+reconcile those files in a reviewed PR using the existing tag's actual commit
+range and publication date. Never move tags or replace published artifacts to
+repair bookkeeping, and never include later changes in a historical entry.
 
 The `Release` workflow waits for the `publish` environment checks, imports the GPG key from environment secrets, and runs GoReleaser. GoReleaser builds OS/architecture zip files, generates an SPDX JSON software bill of materials (SBOM) for each zip, includes the SBOMs in the signed checksum file, includes `terraform-registry-manifest.json`, and creates a draft GitHub Release. The approved publishing job then generates GitHub OIDC-backed build-provenance attestations for every artifact in the verified, signed checksum file, including each provider archive, SBOM, and registry manifest. It verifies every provider archive's attestation against this repository, release workflow, version tag, and source commit before publishing the draft. A missing, invalid, or mismatched attestation blocks publication.
 

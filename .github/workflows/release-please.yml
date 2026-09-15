@@ -26,7 +26,6 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-          skip-labeling: true
           # Create/update the release PR, but keep artifact publication in the
           # explicit protected tag-triggered release workflow.
           skip-github-release: true
