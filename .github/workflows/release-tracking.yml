@@ -1,0 +1,25 @@
+name: Release Tracking
+
+on:
+  pull_request:
+  merge_group:
+    types:
+      - checks_requested
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Release Tracking Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Test release tracking offline
+        run: python3 -B -m unittest discover -s .github/scripts -p '*_test.py'

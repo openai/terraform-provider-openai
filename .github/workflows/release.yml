@@ -14,11 +14,17 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+
+      - name: Verify release tracking
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/release_tracking.py verify
 
       - name: Verify release SBOMs
         uses: ./.github/actions/verify-release-sboms
@@ -107,3 +113,20 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
         run: release-verifier --publish "$GITHUB_REF_NAME" "$GPG_FINGERPRINT"
+
+  complete-release:
+    name: Complete release tracking
+    needs: goreleaser
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Mark the published release PR as tagged
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/release_tracking.py complete
