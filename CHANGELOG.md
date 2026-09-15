@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.2](https://github.com/openai/terraform-provider-openai/compare/v1.1.1...v1.1.2) (2026-09-15)
+
+
+### Bug Fixes
+
+* separate Registry and SBOM release checksums ([#98](https://github.com/openai/terraform-provider-openai/issues/98)) ([816f54e](https://github.com/openai/terraform-provider-openai/commit/816f54e14b9af40b9dd292021e692427237edb3e))
+
 ## [1.1.1](https://github.com/openai/terraform-provider-openai/compare/v1.1.0...v1.1.1) (2026-09-15)
 
 
