@@ -30,7 +30,8 @@ builds:
       goarch: arm
   binary: '{{ .ProjectName }}_v{{ .Version }}'
 archives:
-- formats:
+- id: provider-packages
+  formats:
   - zip
   name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
 sboms:
@@ -64,6 +65,9 @@ sboms:
   documents:
     - '${artifact}.spdx.json'
 checksum:
+  # GoReleaser refreshes this file after signing; it must always be Registry-only.
+  ids:
+    - provider-packages
   extra_files:
     - glob: 'terraform-registry-manifest.json'
       name_template: '{{ .ProjectName }}_{{ .Version }}_manifest.json'
@@ -86,6 +90,10 @@ signs:
       - "${artifact}"
 release:
   extra_files:
+    # Created by release-verifier after validating the complete inventory.
+    # Keep ancillary checksums out of the Registry's exact SHA256SUMS filename.
+    - glob: 'dist/{{ .ProjectName }}_{{ .Version }}_sbom_checksums.txt'
+    - glob: 'dist/{{ .ProjectName }}_{{ .Version }}_sbom_checksums.txt.sig'
     - glob: 'terraform-registry-manifest.json'
       name_template: '{{ .ProjectName }}_{{ .Version }}_manifest.json'
   # If you want to manually examine the release before its live, uncomment this line:

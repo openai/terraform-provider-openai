@@ -24,6 +24,51 @@ func TestDraftPublicationRejectsUnverifiedRemoteArtifacts(t *testing.T) {
 	}{
 		{name: "valid signed draft", draft: true},
 		{
+			name: "Registry checksum includes SBOMs as in v1.1.1",
+			mutate: func(t *testing.T, remote string, fixture releaseFixture) {
+				full, err := os.ReadFile(fixture.manifest)
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeFixtureFile(t, filepath.Join(remote, filepath.Base(fixture.manifest)), full)
+			},
+			draft: true, resignManifest: true, wantErr: "unexpected Registry checksum entry",
+		},
+		{
+			name: "missing SBOM checksum signature",
+			mutate: func(t *testing.T, remote string, _ releaseFixture) {
+				if err := os.Remove(filepath.Join(remote, "terraform-provider-openai_1.2.3_sbom_checksums.txt.sig")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			draft: true, wantErr: "missing signed checksum artifact",
+		},
+		{
+			name: "forged SBOM checksum signature",
+			mutate: func(t *testing.T, remote string, _ releaseFixture) {
+				writeFixtureFile(t, filepath.Join(remote, "terraform-provider-openai_1.2.3_sbom_checksums.txt.sig"), []byte("forged"))
+			},
+			draft: true, wantErr: "verify uploaded checksum signature",
+		},
+		{
+			name:       "SBOM checksum replaced after verified download",
+			draft:      true,
+			swapTarget: "terraform-provider-openai_1.2.3_sbom_checksums.txt",
+			swapAfter:  "terraform-provider-openai_1.2.3_sbom_checksums.txt.sig",
+			wantErr:    "uploaded release assets changed during verification",
+		},
+		{
+			name: "SBOM checksum contains a provider ZIP",
+			mutate: func(t *testing.T, remote string, fixture releaseFixture) {
+				full, err := os.ReadFile(fixture.manifest)
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeFixtureFile(t, filepath.Join(remote, "terraform-provider-openai_1.2.3_sbom_checksums.txt"), full)
+			},
+			draft: true, resignManifest: true, wantErr: "unexpected SBOM checksum entry",
+		},
+		{
 			name: "remote asset has no immutable identity",
 			mutateInventory: func(assets []releaseAsset) {
 				assets[0].ID = ""
@@ -111,6 +156,7 @@ func TestDraftPublicationRejectsUnverifiedRemoteArtifacts(t *testing.T) {
 					}
 				}
 				writeFixtureFile(t, path, []byte(strings.Join(retained, "\n")+"\n"))
+				removeRemoteSBOMEntry(t, remote, archive+".spdx.json")
 			},
 			draft:          true,
 			resignManifest: true,
@@ -212,6 +258,12 @@ func TestDraftPublicationRejectsUnverifiedRemoteArtifacts(t *testing.T) {
 					t.Fatal(err)
 				}
 				writeFixtureFile(t, path, []byte(strings.ReplaceAll(string(manifest), original, replacement)))
+				sbomPath := filepath.Join(remote, "terraform-provider-openai_1.2.3_sbom_checksums.txt")
+				sbomManifest, err := os.ReadFile(sbomPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeFixtureFile(t, sbomPath, []byte(strings.ReplaceAll(string(sbomManifest), original, replacement)))
 			},
 			draft:          true,
 			resignManifest: true,
@@ -287,17 +339,34 @@ func TestDraftPublicationRejectsUnverifiedRemoteArtifacts(t *testing.T) {
 				t.Fatal(err)
 			}
 			writeFixtureFile(t, filepath.Join(remote, "terraform-provider-openai_1.2.3_manifest.json"), registry)
+			// Fixtures record the complete artifact inventory; production signing
+			// publishes two distinct signed checksum sets.
+			full, err := os.ReadFile(fixture.manifest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			registrySums, sbomSums, err := splitReleaseChecksums(full)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeFixtureFile(t, filepath.Join(remote, filepath.Base(fixture.manifest)), registrySums)
+			writeFixtureFile(t, filepath.Join(remote, "terraform-provider-openai_1.2.3_sbom_checksums.txt"), sbomSums)
 			writeFixtureFile(t, filepath.Join(remote, filepath.Base(fixture.manifest)+".sig"), []byte("trusted detached signature"))
+			writeFixtureFile(t, filepath.Join(remote, "terraform-provider-openai_1.2.3_sbom_checksums.txt.sig"), []byte("trusted SBOM signature"))
 
 			directory := t.TempDir()
 			expectedManifest := filepath.Join(directory, "expected-manifest")
-			manifest, err := os.ReadFile(fixture.manifest)
+			manifest, err := os.ReadFile(filepath.Join(remote, filepath.Base(fixture.manifest)))
 			if err != nil {
 				t.Fatal(err)
 			}
 			writeFixtureFile(t, expectedManifest, manifest)
 			expectedSignature := filepath.Join(directory, "expected-signature")
 			writeFixtureFile(t, expectedSignature, []byte("trusted detached signature"))
+			expectedSBOM := filepath.Join(directory, "expected-sbom-manifest")
+			writeFixtureFile(t, expectedSBOM, sbomSums)
+			expectedSBOMSignature := filepath.Join(directory, "expected-sbom-signature")
+			writeFixtureFile(t, expectedSBOMSignature, []byte("trusted SBOM signature"))
 			if test.mutate != nil {
 				test.mutate(t, remote, fixture)
 			}
@@ -307,6 +376,11 @@ func TestDraftPublicationRejectsUnverifiedRemoteArtifacts(t *testing.T) {
 					t.Fatal(err)
 				}
 				writeFixtureFile(t, expectedManifest, updated)
+				updatedSBOM, err := os.ReadFile(filepath.Join(remote, "terraform-provider-openai_1.2.3_sbom_checksums.txt"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeFixtureFile(t, expectedSBOM, updatedSBOM)
 			}
 
 			entries, err := os.ReadDir(remote)
@@ -372,6 +446,7 @@ func TestDraftPublicationRejectsUnverifiedRemoteArtifacts(t *testing.T) {
 			writeFixtureFile(t, gpg, []byte("#!/bin/sh\n"+
 				"test \"$3\" = \"$MOCK_SIGNER\" || exit 3\n"+
 				"test \"$5\" = /dev/fd/3 || exit 6\n"+
+				"if cmp \"$5\" \"$MOCK_EXPECTED_SBOM_SIGNATURE\" >/dev/null 2>&1; then cmp - \"$MOCK_EXPECTED_SBOM\" >/dev/null; exit; fi\n"+
 				"cmp \"$5\" \"$MOCK_EXPECTED_SIGNATURE\" >/dev/null || exit 4\n"+
 				"cmp - \"$MOCK_EXPECTED_MANIFEST\" >/dev/null || exit 5\n"))
 			for _, path := range []string{gh, gpg} {
@@ -385,6 +460,8 @@ func TestDraftPublicationRejectsUnverifiedRemoteArtifacts(t *testing.T) {
 			t.Setenv("MOCK_PUBLISH_RECORD", published)
 			t.Setenv("MOCK_EXPECTED_MANIFEST", expectedManifest)
 			t.Setenv("MOCK_EXPECTED_SIGNATURE", expectedSignature)
+			t.Setenv("MOCK_EXPECTED_SBOM", expectedSBOM)
+			t.Setenv("MOCK_EXPECTED_SBOM_SIGNATURE", expectedSBOMSignature)
 			t.Setenv("MOCK_SIGNER", "0123456789ABCDEF0123456789ABCDEF01234567")
 			if test.swapTarget != "" {
 				trigger := test.swapAfter
@@ -430,6 +507,9 @@ func replaceRemoteArtifact(t *testing.T, remote string, fixture releaseFixture, 
 	}
 	writeFixtureFile(t, filepath.Join(remote, name), contents)
 	manifestPath := filepath.Join(remote, filepath.Base(fixture.manifest))
+	if strings.HasSuffix(name, ".spdx.json") {
+		manifestPath = filepath.Join(remote, "terraform-provider-openai_1.2.3_sbom_checksums.txt")
+	}
 	manifest, err := os.ReadFile(manifestPath)
 	if err != nil {
 		t.Fatal(err)
@@ -437,4 +517,20 @@ func replaceRemoteArtifact(t *testing.T, remote string, fixture releaseFixture, 
 	before := fmt.Sprintf("%x", sha256.Sum256(original))
 	after := fmt.Sprintf("%x", sha256.Sum256(contents))
 	writeFixtureFile(t, manifestPath, []byte(strings.Replace(string(manifest), before+"  "+name, after+"  "+name, 1)))
+}
+
+func removeRemoteSBOMEntry(t *testing.T, remote, name string) {
+	t.Helper()
+	path := filepath.Join(remote, "terraform-provider-openai_1.2.3_sbom_checksums.txt")
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var retained []string
+	for _, line := range strings.Split(strings.TrimSuffix(string(contents), "\n"), "\n") {
+		if !strings.HasSuffix(line, "  "+name) {
+			retained = append(retained, line)
+		}
+	}
+	writeFixtureFile(t, path, []byte(strings.Join(retained, "\n")+"\n"))
 }

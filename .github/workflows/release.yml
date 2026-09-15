@@ -84,6 +84,7 @@ jobs:
         run: |
           export PATH="$RELEASE_TOOLS_DIR:$PATH"
           "$RELEASE_TOOLS_DIR/goreleaser" release --clean --draft
+          echo "sbom-checksums=dist/terraform-provider-openai_${GITHUB_REF_NAME#v}_sbom_checksums.txt" >> "$GITHUB_OUTPUT"
           echo "checksums=dist/terraform-provider-openai_${GITHUB_REF_NAME#v}_SHA256SUMS" >> "$GITHUB_OUTPUT"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -95,6 +96,11 @@ jobs:
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-checksums: ${{ steps.goreleaser.outputs.checksums }}
+
+      - name: Attest verified SBOMs
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: ${{ steps.goreleaser.outputs.sbom-checksums }}
 
       - name: Verify provider archive attestations
         env:
