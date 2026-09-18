@@ -16,7 +16,10 @@ associations as computed attributes; it does not configure or reconcile them.
 ```terraform
 terraform {
   required_providers {
-    openai = { source = "openai/openai" }
+    openai = {
+      source  = "openai/openai"
+      version = ">= 1.2.0"
+    }
   }
 }
 
@@ -31,6 +34,22 @@ output "tunnel_id" {
   value = openai_mcp_tunnel.private_mcp.id
 }
 ```
+
+With `OPENAI_ADMIN_KEY` set for the intended organization, initialize and apply
+the configuration:
+
+```sh
+terraform init
+terraform validate
+terraform plan
+terraform apply
+terraform output -raw tunnel_id
+```
+
+If upgrading an existing configuration, run `terraform init -upgrade` to replace
+an older provider selection. If your organization configures a provider mirror,
+use its approved installation path. Review the plan and confirm the apply when
+prompted.
 
 Use the returned ID as `CONTROL_PLANE_TUNNEL_ID` in your runtime, or as
 `tunnel_id` in a Responses API MCP tool. Tunnel registration does not prove that
@@ -68,10 +87,9 @@ Do not give it the provider's admin key. The example refers to an existing
 Secret by name and key; it does not read or manage the Secret contents through
 Terraform.
 
-## Use an unreleased provider build
+## Use a local development build
 
-This resource is available in this checkout and has not yet been released to the
-Terraform Registry. Build this checkout to a local directory:
+To test changes from a provider checkout, build it to a local directory:
 
 ```sh
 mkdir -p /tmp/openai-tunnel-provider
