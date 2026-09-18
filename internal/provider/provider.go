@@ -20,6 +20,7 @@ import (
 	resourcegrouprole "github.com/openai/terraform-provider-openai/internal/provider/resources/group_role"
 	resourcegroupuser "github.com/openai/terraform-provider-openai/internal/provider/resources/group_user"
 	resourceinvite "github.com/openai/terraform-provider-openai/internal/provider/resources/invite"
+	resourcemcptunnel "github.com/openai/terraform-provider-openai/internal/provider/resources/mcp_tunnel"
 	resourceorganizationdataretention "github.com/openai/terraform-provider-openai/internal/provider/resources/organization_data_retention"
 	resourceorganizationspendalert "github.com/openai/terraform-provider-openai/internal/provider/resources/organization_spend_alert"
 	resourceorganizationspendlimit "github.com/openai/terraform-provider-openai/internal/provider/resources/organization_spend_limit"
@@ -153,6 +154,7 @@ func (p *OpenAIProvider) Configure(ctx context.Context, req provider.ConfigureRe
 
 func (p *OpenAIProvider) Resources(ctx context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
+		resourcemcptunnel.NewMcpTunnelResource,
 		resourceinvite.NewInviteResource,
 		resourceorganizationuser.NewOrganizationUserResource,
 		resourceuserrole.NewUserRoleResource,
@@ -182,6 +184,7 @@ func (p *OpenAIProvider) Resources(ctx context.Context) []func() resource.Resour
 
 func (p *OpenAIProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
+		resourcemcptunnel.NewMcpTunnelDataSource,
 		resourceinvite.NewInviteDataSource,
 		resourceinvite.NewInvitesDataSource,
 		resourceorganizationuser.NewOrganizationUserDataSource,

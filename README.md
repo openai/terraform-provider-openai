@@ -7,6 +7,8 @@ roles, service accounts, certificates, rate limits, spend alerts, and related
 project settings.
 
 See [`docs/`](docs/index.md) for resource and data source documentation.
+For private MCP servers, see the [Secure MCP tunnel guide](docs/guides/mcp-tunnel.md)
+and its Kubernetes deployment example.
 
 ## Requirements
 

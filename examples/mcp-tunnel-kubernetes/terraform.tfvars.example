@@ -1,0 +1,12 @@
+name               = "private-mcp-tunnel"
+namespace          = "mcp"
+kubeconfig_path    = "~/.kube/config"
+kubeconfig_context = "my-cluster"
+mcp_server_url     = "http://mcp.mcp.svc.cluster.local:8000/mcp"
+
+# Replace this placeholder with a reviewed image digest before planning.
+tunnel_client_image = "ghcr.io/openai/tunnel-client@sha256:<digest>"
+
+# Reference an existing Secret. Never put the runtime API key in this file.
+runtime_secret_name = "tunnel-client-credentials"
+runtime_secret_key  = "api-key"
