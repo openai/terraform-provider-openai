@@ -3,7 +3,8 @@ terraform {
 
   required_providers {
     openai = {
-      source = "openai/openai"
+      source  = "openai/openai"
+      version = ">= 1.2.0"
     }
     kubernetes = {
       source  = "hashicorp/kubernetes"

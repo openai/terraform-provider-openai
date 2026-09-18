@@ -1,8 +1,7 @@
 # Secure MCP Tunnel on Kubernetes
 
-This example requires the unreleased `openai_mcp_tunnel` resource. Follow the
-[local provider instructions](../../docs/guides/mcp-tunnel.md) before
-running it.
+This example requires `openai/openai` provider version 1.2.0 or later. Follow the
+[provider setup instructions](../../docs/guides/mcp-tunnel.md) before running it.
 
 The OpenAI provider creates the tunnel registration. The Kubernetes provider
 runs a single `tunnel-client` gateway that forwards to an existing private HTTP
@@ -27,11 +26,12 @@ terraform plan
 terraform apply
 ```
 
-`terraform init` installs the Kubernetes provider; keep the local OpenAI
-provider override enabled until a release includes `openai_mcp_tunnel`. If
-your organization configures a provider mirror, use its approved installation
-path. Use a reviewed `ghcr.io/openai/tunnel-client` image digest in
-`tunnel_client_image`; the placeholder is intentionally rejected by validation.
+`terraform init` installs the OpenAI and Kubernetes providers. If upgrading an
+existing configuration, run `terraform init -upgrade` to replace an older
+provider selection. If your organization configures a provider mirror, use its
+approved installation path. Use a reviewed `ghcr.io/openai/tunnel-client` image
+digest in `tunnel_client_image`; the placeholder is intentionally rejected by
+validation.
 
 Applying this example creates a real tunnel and Kubernetes Deployment. It uses
 one client with the `Recreate` strategy to avoid rollout overlap; upgrades
