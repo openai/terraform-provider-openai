@@ -1,7 +1,7 @@
 # Secure MCP Tunnel on Kubernetes
 
-This example requires the unreleased `openai_mcp_tunnel` prototype. Follow the
-[local provider instructions](../../docs/guides/mcp-tunnel-prototype.md) before
+This example requires the unreleased `openai_mcp_tunnel` resource. Follow the
+[local provider instructions](../../docs/guides/mcp-tunnel.md) before
 running it.
 
 The OpenAI provider creates the tunnel registration. The Kubernetes provider
@@ -14,9 +14,26 @@ runtime API key with Tunnels Read + Use through the existing Secret. Only the
 Secret's name and key are referenced in this configuration; no credential
 value is stored in its Terraform variables or resource state.
 
-Initialize the Kubernetes provider, then set the variables and inspect the
-plan. Use a reviewed `ghcr.io/openai/tunnel-client` image digest. Applying this
-example creates a real tunnel and Kubernetes Deployment. This example uses
+Copy the example variables, replace the namespace, cluster context, MCP URL,
+Secret name, and image digest with your deployment values, then inspect the
+plan:
+
+```sh
+cp terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars before continuing. Keep API keys out of this file.
+terraform init
+terraform validate
+terraform plan
+terraform apply
+```
+
+`terraform init` installs the Kubernetes provider; keep the local OpenAI
+provider override enabled until a release includes `openai_mcp_tunnel`. If
+your organization configures a provider mirror, use its approved installation
+path. Use a reviewed `ghcr.io/openai/tunnel-client` image digest in
+`tunnel_client_image`; the placeholder is intentionally rejected by validation.
+
+Applying this example creates a real tunnel and Kubernetes Deployment. It uses
 one client with the `Recreate` strategy to avoid rollout overlap; upgrades
 entail downtime. No Service or Ingress is necessary for the client; it needs
 outbound HTTPS to OpenAI and access to the private MCP endpoint. Port 8080 is
@@ -48,3 +65,7 @@ is where the client runs and how it reaches the MCP server.
 After applying, check `/readyz` and exercise an MCP request through a supported
 OpenAI product. A successful Terraform apply alone is not an end-to-end tunnel
 test. Deleting the tunnel registration disconnects consumers of its ID.
+
+Run `terraform destroy` when you want to remove this deployment and tunnel
+registration. The pre-existing namespace, Secret, and MCP server remain managed
+by their original owners.

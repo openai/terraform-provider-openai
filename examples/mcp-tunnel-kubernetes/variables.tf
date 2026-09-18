@@ -1,7 +1,12 @@
 variable "name" {
   type        = string
   default     = "private-mcp-tunnel"
-  description = "Tunnel and Kubernetes Deployment name. Use a valid Kubernetes name."
+  description = "Tunnel, Kubernetes Deployment, and app label name. Use a lowercase DNS label of at most 63 characters."
+
+  validation {
+    condition     = length(var.name) <= 63 && can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", var.name))
+    error_message = "Use 1-63 lowercase letters, digits, or hyphens, starting and ending with a letter or digit."
+  }
 }
 
 variable "namespace" {
