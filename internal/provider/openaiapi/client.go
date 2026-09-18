@@ -407,6 +407,11 @@ func IsNotFound(err error) bool {
 	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound
 }
 
+func IsNotFoundMessage(err error, message string) bool {
+	var apiErr *openai.Error
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound && apiErr.Message == message
+}
+
 func ValidatePathParameter(name string, value string) error {
 	if strings.TrimSpace(value) == "" {
 		return fmt.Errorf("missing value for path parameter %q", name)
@@ -944,6 +949,15 @@ func (c *APIClient) requestOptions(ctx context.Context, method string, path stri
 }
 
 func (c *APIClient) Request(ctx context.Context, method string, path string, pathParams map[string]string, queryParams map[string]string, body map[string]any) (map[string]any, error) {
+	return c.request(ctx, method, path, pathParams, queryParams, body, false)
+}
+
+// RequestWithoutRetries avoids repeating a mutation whose first attempt may have succeeded.
+func (c *APIClient) RequestWithoutRetries(ctx context.Context, method string, path string, pathParams map[string]string, queryParams map[string]string, body map[string]any) (map[string]any, error) {
+	return c.request(ctx, method, path, pathParams, queryParams, body, true)
+}
+
+func (c *APIClient) request(ctx context.Context, method string, path string, pathParams map[string]string, queryParams map[string]string, body map[string]any, noRetry bool) (map[string]any, error) {
 	ctx = openAIClientLogContext(ctx)
 	expandedPath, err := expandAPIPath(path, pathParams)
 	if err != nil {
@@ -982,6 +996,9 @@ func (c *APIClient) Request(ctx context.Context, method string, path string, pat
 	}
 	defer stopPendingTimer()
 	requestOptions := c.requestOptions(ctx, method, path, lifecycle)
+	if noRetry {
+		requestOptions = append(requestOptions, option.WithMaxRetries(0))
+	}
 
 	var response map[string]any
 	switch method {
