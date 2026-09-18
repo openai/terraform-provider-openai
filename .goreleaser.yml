@@ -89,6 +89,8 @@ signs:
       - "--detach-sign"
       - "${artifact}"
 release:
+  # Keep Release Please's draft and release notes until verification publishes it.
+  use_existing_draft: true
   extra_files:
     # Created by release-verifier after validating the complete inventory.
     # Keep ancillary checksums out of the Registry's exact SHA256SUMS filename.

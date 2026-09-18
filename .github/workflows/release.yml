@@ -42,6 +42,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Require the Release Please draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/release_tracking.py verify-draft
+
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
@@ -132,7 +137,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Mark the published release PR as tagged
+      - name: Record verified artifact publication
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/release_tracking.py complete

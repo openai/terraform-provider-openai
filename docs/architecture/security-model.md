@@ -31,7 +31,7 @@ registry ([main.go](../../main.go#L16-L24),
 | Generated resources and data sources | Map Terraform schemas and CRUD/read operations to organization and project Administration API endpoints. | [internal/provider/provider.go](../../internal/provider/provider.go#L154-L225) |
 | Service-account resource | Creates only a service account and deliberately does not create an API key or assign a role. | [internal/provider/resources/project_service_account/resource_project_service_account.go](../../internal/provider/resources/project_service_account/resource_project_service_account.go#L44-L46), [internal/provider/resources/project_service_account/resource_project_service_account.go](../../internal/provider/resources/project_service_account/resource_project_service_account.go#L121-L159) |
 | Ordinary CI | Builds, tests, lints, formats examples, checks generated docs, and verifies release SBOMs with read-only repository permission. | [.github/workflows/ci.yml](../../.github/workflows/ci.yml#L13-L15), [.github/workflows/ci.yml](../../.github/workflows/ci.yml#L43-L162) |
-| Release workflows | Separately create release PRs and publish signed, attested artifacts after protected-environment controls. | [.github/workflows/release-please.yml](../../.github/workflows/release-please.yml#L8-L32), [.github/workflows/release.yml](../../.github/workflows/release.yml#L12-L109) |
+| Release workflows | Create release PRs, automatically tag their merged commits with draft releases, then publish verified signed artifacts through scoped environments. | [.github/workflows/release-please.yml](../../.github/workflows/release-please.yml#L8-L32), [.github/workflows/release.yml](../../.github/workflows/release.yml#L12-L109) |
 
 ### Effective resources and capabilities
 
@@ -40,7 +40,7 @@ registry ([main.go](../../main.go#L16-L24),
 | Normal provider execution | Administration credential and request destination | `admin_api_key` overrides `OPENAI_ADMIN_KEY`; `base_url` overrides the default origin. | Credential value is secret; default destination is `https://api.openai.com/v1`. | Provider client and configured API origin. | Credential is schema-sensitive; destination validation rejects embedded credentials and non-loopback plaintext HTTP; redirects stay on the configured origin. A deployment must not let a lower-trust config author choose `base_url` while a separate trusted runtime injects the key. | [internal/provider/provider.go](../../internal/provider/provider.go#L67-L77), [internal/provider/provider.go](../../internal/provider/provider.go#L102-L149), [internal/provider/provider_security.go](../../internal/provider/provider_security.go#L19-L52), [internal/provider/provider_security.go](../../internal/provider/provider_security.go#L84-L117) |
 | Terraform state and plans | Organization/project resource state, including certificate-related fields and raw `response_json` on data sources | Terraform configuration, remote API responses, and Terraform backend policy. | Caller-managed Terraform state and plan storage; no repository-owned backend is configured here. Raw response JSON can contain API-returned fields beyond modeled attributes and must be treated as potentially confidential. | Terraform operator and backend-authorized readers. | `Sensitive: true` limits normal display for sensitive schema fields but does not remove values from state or plans; raw `response_json` is intentionally persisted by data sources. | [internal/provider/provider.go](../../internal/provider/provider.go#L67-L72), [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L1450-L1456), [internal/provider/resources/certificate/data_source_certificate.go](../../internal/provider/resources/certificate/data_source_certificate.go#L92-L98), [internal/provider/resources/certificate/data_source_certificate.go](../../internal/provider/resources/certificate/data_source_certificate.go#L155-L156), [CONTRIBUTING.md](../../CONTRIBUTING.md#L85-L93); backend controls are external. |
 | Ordinary pull-request CI | Execution of checked-in build, test, generation, and verification code | Workflow checked out at the proposed revision. | Ephemeral GitHub Actions runner. | PR code can execute in that runner; repository permission is read-only. | Workflow-level `contents: read`; no protected release credentials are declared in this workflow. | [.github/workflows/ci.yml](../../.github/workflows/ci.yml#L13-L15), [.github/workflows/ci.yml](../../.github/workflows/ci.yml#L43-L162) |
-| Release-please on main | GitHub App token for release PR maintenance | Push to `main`, then protected `release` environment. | Token derived from `OPENAI_SDKS_APP_PRIVATE_KEY`; literal secret is never repository data. | release-please action receives contents and pull-request write authority. | Empty workflow default permissions; token created only in the `release` environment with explicit scopes. | [.github/workflows/release-please.yml](../../.github/workflows/release-please.yml#L3-L32) |
+| Release-please on main | GitHub App token for release PRs, tags, and draft releases | Push to `main`, then protected `release` environment. | Token derived from `OPENAI_SDKS_APP_PRIVATE_KEY`; literal secret is never repository data. | release-please action receives contents and pull-request write authority. | Empty workflow default permissions; token created only in the `release` environment with explicit scopes. | [.github/workflows/release-please.yml](../../.github/workflows/release-please.yml#L3-L32) |
 | Tag-triggered publication | GPG signing key, passphrase, OIDC attestations, release publication | Tag matching `v*`, successful SBOM job, then protected `publish` environment. | Protected environment secrets and runner-local verified artifacts. | Publish job, GoReleaser, release verifier, GitHub attestations. | Separate pre-publish SBOM job; publish job has scoped permissions; tools, dependencies, SBOMs, checksums, and attestations are verified. | [.github/workflows/release.yml](../../.github/workflows/release.yml#L3-L33), [.github/workflows/release.yml](../../.github/workflows/release.yml#L44-L109), [.github/actions/setup-release-tools/install.sh](../../.github/actions/setup-release-tools/install.sh#L28-L57), [.github/actions/verify-release-dependencies/action.yml](../../.github/actions/verify-release-dependencies/action.yml#L7-L22) |
 
 ## 2. Threat Model, Trust Boundaries, and Assumptions
@@ -86,8 +86,8 @@ registry ([main.go](../../main.go#L16-L24),
 - A pull-request author can propose changes and cause ordinary CI to execute the
   proposed checkout with read-only repository permission, but does not thereby
   receive protected release or publish credentials.
-- Maintainers, tag creators, and protected-environment approvers can promote a
-  reviewed revision into release workflows. Their configured GitHub protections
+- Code-owner review and required checks authorize a merged release PR; the SDK
+  App promotes its exact revision into release workflows. Their configured GitHub protections
   are external to this checkout.
 
 ### Canonical repository-code trust rule
@@ -159,7 +159,9 @@ reach credentials or authority reserved for protected CI/release workflows.
    [.github/workflows/release.yml](../../.github/workflows/release.yml#L26-L33)).
 7. **Tag to signed publication.** A `v*` tag triggers the Release workflow,
    but reaches the privileged publication job only after release-SBOM
-   verification succeeds and the protected publish environment gate applies.
+   verification succeeds and the tag matches the exact merged release PR. The
+   publish environment restricts credentials to release tags; no second manual
+   deployment approval is required.
    Downloaded tools, ambient runner state, dependency caches, generated SBOMs,
    checksums, and attestations remain distinct lower-trust inputs that must be
    verified before signing or publication
@@ -174,7 +176,7 @@ reach credentials or authority reserved for protected CI/release workflows.
   cannot prove them offline.
 - Terraform host integrity, state-backend access control, proxy/TLS trust roots,
   and environment-variable provenance are deployment responsibilities.
-- Branch protection, tag protection, protected-environment reviewers, and secret
+- Branch protection, tag creation/immutability rules, environment ref filters, and secret
   scoping are documented operational expectations but are not verifiable from
   this checkout ([RELEASING.md](../../RELEASING.md#L80-L85)).
 - Upstream generator provenance is not present here. Scans should analyze the
