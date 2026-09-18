@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/openai/terraform-provider-openai/compare/v1.1.2...v1.2.0) (2026-09-18)
+
+
+### Features
+
+* add MCP tunnel resource and data source ([#103](https://github.com/openai/terraform-provider-openai/issues/103)) ([ddac965](https://github.com/openai/terraform-provider-openai/commit/ddac965e67a291234354378a382a2db40b7a42ad))
+
 ## [1.1.2](https://github.com/openai/terraform-provider-openai/compare/v1.1.1...v1.1.2) (2026-09-15)
 
 
