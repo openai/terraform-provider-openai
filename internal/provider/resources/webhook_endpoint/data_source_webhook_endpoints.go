@@ -47,7 +47,7 @@ func (d *WebhookEndpointsDataSource) Metadata(ctx context.Context, req datasourc
 
 func (d *WebhookEndpointsDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Beta. List webhook endpoints in the authenticated project using the `api_key` provider attribute or `OPENAI_API_KEY`. Requires `api.webhooks.read`; an organization Admin API key is not accepted.\n\nAuthentication: Set the api_key provider attribute or OPENAI_API_KEY environment variable for the project API audience.",
+		MarkdownDescription: "Beta. List webhook endpoints in the authenticated project using the `api_key` provider attribute or `OPENAI_API_KEY`. Requires `api.webhooks.read`; an organization Admin API key is not accepted.\n\nAuthentication: Set the api_key provider attribute or OPENAI_API_KEY environment variable for the project API audience; with a custom base_url, set the api_key provider attribute explicitly.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "Synthetic data source identifier.",
@@ -123,7 +123,7 @@ func (d *WebhookEndpointsDataSource) Configure(ctx context.Context, req datasour
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Missing OpenAI credential for project API",
-			"Set the api_key provider attribute or OPENAI_API_KEY environment variable for the project API audience before using openai_webhook_endpoints. Credentials are not reused across API audiences.",
+			"Set the api_key provider attribute or OPENAI_API_KEY environment variable for the project API audience; with a custom base_url, set the api_key provider attribute explicitly before using openai_webhook_endpoints. Credentials are not reused across API audiences.",
 		)
 		return
 	}

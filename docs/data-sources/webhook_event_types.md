@@ -4,14 +4,14 @@ page_title: "openai_webhook_event_types Data Source - openai"
 subcategory: ""
 description: |-
   Beta. List webhook event types visible to the authenticated project using the api_key provider attribute or OPENAI_API_KEY. Requires api.webhooks.read; an organization Admin API key is not accepted.
-  Authentication: Set the api_key provider attribute or OPENAI_API_KEY environment variable for the project API audience.
+  Authentication: Set the api_key provider attribute or OPENAI_API_KEY environment variable for the project API audience; with a custom base_url, set the api_key provider attribute explicitly.
 ---
 
 # openai_webhook_event_types (Data Source)
 
 Beta. List webhook event types visible to the authenticated project using the `api_key` provider attribute or `OPENAI_API_KEY`. Requires `api.webhooks.read`; an organization Admin API key is not accepted.
 
-Authentication: Set the api_key provider attribute or OPENAI_API_KEY environment variable for the project API audience.
+Authentication: Set the api_key provider attribute or OPENAI_API_KEY environment variable for the project API audience; with a custom base_url, set the api_key provider attribute explicitly.
 
 ## Example Usage
 
