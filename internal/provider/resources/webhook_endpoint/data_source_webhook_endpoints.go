@@ -61,7 +61,7 @@ func (d *WebhookEndpointsDataSource) Schema(ctx context.Context, req datasource.
 				Required:            false,
 				Optional:            false,
 				Computed:            true,
-				Sensitive:           false,
+				Sensitive:           true,
 			},
 
 			"webhook_endpoints": schema.ListNestedAttribute{
@@ -80,6 +80,7 @@ func (d *WebhookEndpointsDataSource) Schema(ctx context.Context, req datasource.
 						"url": schema.StringAttribute{
 							MarkdownDescription: "url",
 							Computed:            true,
+							Sensitive:           true,
 						},
 						"event_types": schema.SetAttribute{
 							MarkdownDescription: "event types",

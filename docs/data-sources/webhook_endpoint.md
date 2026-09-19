@@ -31,7 +31,7 @@ data "openai_webhook_endpoint" "example" {
 - `event_types` (Set of String) event types
 - `name` (String) name
 - `object` (String) object
-- `response_json` (String) Raw JSON response returned by the OpenAI API.
+- `response_json` (String, Sensitive) Raw JSON response returned by the OpenAI API.
 - `signing_secret_hint` (String) signing secret hint
 - `updated_at` (Number) updated at
-- `url` (String) url
+- `url` (String, Sensitive) url

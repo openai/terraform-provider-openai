@@ -31,8 +31,21 @@ func configureProviderWithBaseURL(t *testing.T, baseURL string, explicit bool) p
 
 func configureProviderWithCredentialValues(t *testing.T, baseURL string, explicit bool, credentialValues map[string]string) provider.ConfigureResponse {
 	t.Helper()
+
+	attributeOverrides := make(map[string]tftypes.Value, len(credentialValues))
+	for name, value := range credentialValues {
+		attributeOverrides[name] = tftypes.NewValue(tftypes.String, value)
+	}
+	return configureProviderWithAttributeValues(t, baseURL, explicit, attributeOverrides, nil)
+}
+
+func configureProviderWithAttributeValues(t *testing.T, baseURL string, explicit bool, attributeOverrides map[string]tftypes.Value, environmentValues map[string]string) provider.ConfigureResponse {
+	t.Helper()
 	t.Setenv("OPENAI_ADMIN_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "")
+	for name, value := range environmentValues {
+		t.Setenv(name, value)
+	}
 
 	ctx := context.Background()
 	configuredProvider := &OpenAIProvider{version: "test"}
@@ -45,8 +58,8 @@ func configureProviderWithCredentialValues(t *testing.T, baseURL string, explici
 		attributeTypes[name] = tftypes.String
 		attributeValues[name] = tftypes.NewValue(tftypes.String, nil)
 	}
-	for name, value := range credentialValues {
-		attributeValues[name] = tftypes.NewValue(tftypes.String, value)
+	for name, value := range attributeOverrides {
+		attributeValues[name] = value
 	}
 	if explicit {
 		attributeValues["base_url"] = tftypes.NewValue(tftypes.String, baseURL)
@@ -295,6 +308,44 @@ func TestProviderSameOriginRedirectPreservesAdminCredentials(t *testing.T) {
 	}
 	if got := receivedAuthorization.Load(); got != "Bearer "+testAdminAPIKey {
 		t.Fatalf("same-origin redirect authorization = %v", got)
+	}
+}
+
+func TestProviderRejectsUnknownCredentialsWithoutEnvironmentFallback(t *testing.T) {
+	tests := []struct {
+		name                string
+		field               string
+		environmentVariable string
+	}{
+		{
+			name:                "admin_api_key",
+			field:               "admin_api_key",
+			environmentVariable: "OPENAI_ADMIN_KEY",
+		},
+		{
+			name:                "api_key",
+			field:               "api_key",
+			environmentVariable: "OPENAI_API_KEY",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := configureProviderWithAttributeValues(
+				t,
+				"https://api.openai.com/v1",
+				true,
+				map[string]tftypes.Value{
+					test.field: tftypes.NewValue(tftypes.String, tftypes.UnknownValue),
+				},
+				map[string]string{test.environmentVariable: "synthetic-ambient-credential"},
+			)
+			if !response.Diagnostics.HasError() {
+				t.Fatal("provider configuration unexpectedly accepted an unknown credential")
+			}
+			if response.ResourceData != nil || response.DataSourceData != nil {
+				t.Fatal("provider configuration returned data for an unknown credential")
+			}
+		})
 	}
 }
 

@@ -23,7 +23,7 @@ data "openai_webhook_endpoints" "example" {
 ### Read-Only
 
 - `id` (String) Synthetic data source identifier.
-- `response_json` (String) Raw JSON response returned by the OpenAI API.
+- `response_json` (String, Sensitive) Raw JSON response returned by the OpenAI API.
 - `webhook_endpoints` (Attributes List) Webhook endpoints returned by the API. (see [below for nested schema](#nestedatt--webhook_endpoints))
 
 <a id="nestedatt--webhook_endpoints"></a>
@@ -38,4 +38,4 @@ Read-Only:
 - `object` (String) object
 - `signing_secret_hint` (String) signing secret hint
 - `updated_at` (Number) updated at
-- `url` (String) url
+- `url` (String, Sensitive) url

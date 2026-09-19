@@ -68,7 +68,7 @@ func (d *WebhookEndpointDataSource) Schema(ctx context.Context, req datasource.S
 				Required:            false,
 				Optional:            false,
 				Computed:            true,
-				Sensitive:           false,
+				Sensitive:           true,
 			},
 			"event_types": schema.SetAttribute{
 				MarkdownDescription: "event types",
@@ -111,7 +111,7 @@ func (d *WebhookEndpointDataSource) Schema(ctx context.Context, req datasource.S
 				Required:            false,
 				Optional:            false,
 				Computed:            true,
-				Sensitive:           false,
+				Sensitive:           true,
 			},
 		},
 	}

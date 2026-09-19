@@ -25,6 +25,17 @@ case "$(uname -s)/$(uname -m)" in
     ;;
 esac
 
+sha256_digest() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    echo "No SHA-256 utility is available" >&2
+    return 1
+  fi
+}
+
 install_verified_archive() {
   local repository="$1"
   local version="$2"
@@ -38,8 +49,7 @@ install_verified_archive() {
     --output "$archive_path" \
     "https://github.com/${repository}/releases/download/${version}/${archive}"
 
-  actual_sha256="$(sha256sum "$archive_path")"
-  actual_sha256="${actual_sha256%% *}"
+  actual_sha256="$(sha256_digest "$archive_path")"
   if [[ "$actual_sha256" != "$expected_sha256" ]]; then
     echo "SHA-256 mismatch for ${archive}: expected ${expected_sha256}, got ${actual_sha256}" >&2
     exit 1

@@ -27,7 +27,7 @@ resource "openai_webhook_endpoint" "example" {
 
 - `event_types` (Set of String) Event types delivered to this endpoint.
 - `name` (String) Human-readable webhook endpoint name.
-- `url` (String) HTTPS URL that receives webhook events.
+- `url` (String, Sensitive) HTTPS URL that receives webhook events.
 
 ### Read-Only
 

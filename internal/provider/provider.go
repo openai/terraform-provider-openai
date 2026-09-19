@@ -109,13 +109,21 @@ func (p *OpenAIProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	}
 
 	clientConfig := &openaiapi.APIClient{BaseURL: "https://api.openai.com/v1", ProviderVersion: p.version}
-	if !data.AdminAPIKey.IsNull() && !data.AdminAPIKey.IsUnknown() {
+	if data.AdminAPIKey.IsUnknown() {
+		resp.Diagnostics.AddError("Unknown OpenAI credential", "The admin_api_key provider attribute must be known during provider configuration; omit it to use OPENAI_ADMIN_KEY.")
+		return
+	}
+	if !data.AdminAPIKey.IsNull() {
 		clientConfig.AdminAPIKey = data.AdminAPIKey.ValueString()
 	} else if value, ok := os.LookupEnv("OPENAI_ADMIN_KEY"); ok {
 		clientConfig.AdminAPIKey = value
 	}
 
-	if !data.APIKey.IsNull() && !data.APIKey.IsUnknown() {
+	if data.APIKey.IsUnknown() {
+		resp.Diagnostics.AddError("Unknown OpenAI credential", "The api_key provider attribute must be known during provider configuration; omit it to use OPENAI_API_KEY.")
+		return
+	}
+	if !data.APIKey.IsNull() {
 		clientConfig.APIKey = data.APIKey.ValueString()
 	} else if value, ok := os.LookupEnv("OPENAI_API_KEY"); ok {
 		clientConfig.APIKey = value

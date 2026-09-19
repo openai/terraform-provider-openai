@@ -77,7 +77,7 @@ func (r *WebhookEndpointResource) Schema(ctx context.Context, req resource.Schem
 				Required:            true,
 				Optional:            false,
 				Computed:            false,
-				Sensitive:           false,
+				Sensitive:           true,
 				Validators: []validator.String{
 					openaiapi.StringLengthAtLeast(1),
 				},
