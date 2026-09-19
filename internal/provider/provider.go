@@ -41,6 +41,7 @@ import (
 	resourceprojectuserrole "github.com/openai/terraform-provider-openai/internal/provider/resources/project_user_role"
 	resourcerole "github.com/openai/terraform-provider-openai/internal/provider/resources/role"
 	resourceuserrole "github.com/openai/terraform-provider-openai/internal/provider/resources/user_role"
+	resourcewebhookendpoint "github.com/openai/terraform-provider-openai/internal/provider/resources/webhook_endpoint"
 )
 
 var _ provider.Provider = &OpenAIProvider{}
@@ -51,6 +52,7 @@ type OpenAIProvider struct {
 
 type OpenAIProviderModel struct {
 	AdminAPIKey  types.String `tfsdk:"admin_api_key"`
+	APIKey       types.String `tfsdk:"api_key"`
 	BaseURL      types.String `tfsdk:"base_url"`
 	Organization types.String `tfsdk:"organization"`
 	Project      types.String `tfsdk:"project"`
@@ -63,10 +65,16 @@ func (p *OpenAIProvider) Metadata(ctx context.Context, req provider.MetadataRequ
 
 func (p *OpenAIProvider) Schema(ctx context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Terraform provider for OpenAI administration APIs, specific to the API Platform.",
+		MarkdownDescription: "Terraform provider for OpenAI API Platform administration and project webhook APIs.",
 		Attributes: map[string]schema.Attribute{
 			"admin_api_key": schema.StringAttribute{
 				MarkdownDescription: "Admin API key used for organization administration requests.",
+				Required:            false,
+				Optional:            true,
+				Sensitive:           true,
+			},
+			"api_key": schema.StringAttribute{
+				MarkdownDescription: "Project API key used for project-scoped requests such as webhook management.",
 				Required:            false,
 				Optional:            true,
 				Sensitive:           true,
@@ -100,60 +108,97 @@ func (p *OpenAIProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		return
 	}
 
-	client := &openaiapi.APIClient{BaseURL: "https://api.openai.com/v1", ProviderVersion: p.version}
-	if !data.AdminAPIKey.IsNull() && !data.AdminAPIKey.IsUnknown() {
-		client.AdminAPIKey = data.AdminAPIKey.ValueString()
+	clientConfig := &openaiapi.APIClient{BaseURL: "https://api.openai.com/v1", ProviderVersion: p.version}
+	if data.AdminAPIKey.IsUnknown() {
+		resp.Diagnostics.AddError("Unknown OpenAI credential", "The admin_api_key provider attribute must be known during provider configuration; omit it to use OPENAI_ADMIN_KEY.")
+		return
+	}
+	if !data.AdminAPIKey.IsNull() {
+		clientConfig.AdminAPIKey = data.AdminAPIKey.ValueString()
 	} else if value, ok := os.LookupEnv("OPENAI_ADMIN_KEY"); ok {
-		client.AdminAPIKey = value
+		clientConfig.AdminAPIKey = value
+	}
+
+	credentialAPIKeyFromEnvironment := false
+	if data.APIKey.IsUnknown() {
+		resp.Diagnostics.AddError("Unknown OpenAI credential", "The api_key provider attribute must be known during provider configuration; omit it to use OPENAI_API_KEY.")
+		return
+	}
+	if !data.APIKey.IsNull() {
+		clientConfig.APIKey = data.APIKey.ValueString()
+	} else if value, ok := os.LookupEnv("OPENAI_API_KEY"); ok {
+		clientConfig.APIKey = value
+		credentialAPIKeyFromEnvironment = true
 	}
 
 	if !data.BaseURL.IsNull() && !data.BaseURL.IsUnknown() {
-		client.BaseURL = data.BaseURL.ValueString()
+		clientConfig.BaseURL = data.BaseURL.ValueString()
 	}
 
 	if !data.Organization.IsNull() && !data.Organization.IsUnknown() {
-		client.Organization = data.Organization.ValueString()
+		clientConfig.Organization = data.Organization.ValueString()
 	} else if value, ok := os.LookupEnv("OPENAI_ORG_ID"); ok {
-		client.Organization = value
+		clientConfig.Organization = value
 	}
 
 	if !data.Project.IsNull() && !data.Project.IsUnknown() {
-		client.Project = data.Project.ValueString()
+		clientConfig.Project = data.Project.ValueString()
 	} else if value, ok := os.LookupEnv("OPENAI_PROJECT_ID"); ok {
-		client.Project = value
+		clientConfig.Project = value
 	}
 
-	client.BaseURL = strings.TrimSpace(client.BaseURL)
-	apiEndpoint, err := validateAPIBaseURL(client.BaseURL)
+	clientConfig.BaseURL = strings.TrimSpace(clientConfig.BaseURL)
+	apiEndpoint, err := validateAPIBaseURL(clientConfig.BaseURL)
 	if err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API base URL", err.Error())
 		return
 	}
-	if strings.TrimSpace(client.AdminAPIKey) == "" {
-		resp.Diagnostics.AddError("Missing OpenAI API key", "Set admin_api_key, OPENAI_ADMIN_KEY.")
+	if credentialAPIKeyFromEnvironment && !isDefaultOpenAIAPIOrigin(apiEndpoint) {
+		clientConfig.APIKey = ""
+		if strings.TrimSpace(clientConfig.AdminAPIKey) == "" {
+			resp.Diagnostics.AddError("Ambient OpenAI credential requires default origin", "OPENAI_API_KEY is only used with the default OpenAI API origin. Set the api_key provider attribute explicitly to authorize this credential audience for a custom base_url.")
+			return
+		}
+		resp.Diagnostics.AddWarning("Ignored ambient OpenAI credential", "OPENAI_API_KEY is only used with the default OpenAI API origin. Set the api_key provider attribute explicitly to authorize this credential audience for a custom base_url.")
+	}
+	if strings.TrimSpace(clientConfig.AdminAPIKey) == "" && strings.TrimSpace(clientConfig.APIKey) == "" {
+		resp.Diagnostics.AddError("Missing OpenAI API key", "Set admin_api_key, OPENAI_ADMIN_KEY, api_key, OPENAI_API_KEY.")
 		return
 	}
-	options := []option.RequestOption{
-		option.WithBaseURL(client.BaseURL),
-		option.WithHTTPClient(newCredentialAudienceHTTPClient(apiEndpoint)),
+	newAPIClient := func(apiKey string) *openaiapi.APIClient {
+		options := []option.RequestOption{
+			option.WithBaseURL(clientConfig.BaseURL),
+			option.WithHTTPClient(newCredentialAudienceHTTPClient(apiEndpoint)),
+			option.WithAPIKey(apiKey),
+		}
+		if strings.TrimSpace(clientConfig.Organization) != "" {
+			options = append(options, option.WithOrganization(clientConfig.Organization))
+		}
+		if strings.TrimSpace(clientConfig.Project) != "" {
+			options = append(options, option.WithProject(clientConfig.Project))
+		}
+		return &openaiapi.APIClient{
+			BaseURL:         clientConfig.BaseURL,
+			Organization:    clientConfig.Organization,
+			Project:         clientConfig.Project,
+			ProviderVersion: p.version,
+			Client:          openai.NewClient(options...),
+		}
 	}
-	apiKey := strings.TrimSpace(client.AdminAPIKey)
-	if apiKey != "" {
-		options = append(options, option.WithAPIKey(apiKey))
+	providerData := openaiapi.NewProviderData()
+	if apiKey := strings.TrimSpace(clientConfig.AdminAPIKey); apiKey != "" {
+		providerData.SetClient("admin", newAPIClient(apiKey))
 	}
-	if strings.TrimSpace(client.Organization) != "" {
-		options = append(options, option.WithOrganization(client.Organization))
+	if apiKey := strings.TrimSpace(clientConfig.APIKey); apiKey != "" {
+		providerData.SetClient("project", newAPIClient(apiKey))
 	}
-	if strings.TrimSpace(client.Project) != "" {
-		options = append(options, option.WithProject(client.Project))
-	}
-	client.Client = openai.NewClient(options...)
-	resp.DataSourceData = client
-	resp.ResourceData = client
+	resp.DataSourceData = providerData
+	resp.ResourceData = providerData
 }
 
 func (p *OpenAIProvider) Resources(ctx context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
+		resourcewebhookendpoint.NewWebhookEndpointResource,
 		resourcemcptunnel.NewMcpTunnelResource,
 		resourceinvite.NewInviteResource,
 		resourceorganizationuser.NewOrganizationUserResource,
@@ -184,6 +229,9 @@ func (p *OpenAIProvider) Resources(ctx context.Context) []func() resource.Resour
 
 func (p *OpenAIProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
+		resourcewebhookendpoint.NewWebhookEndpointDataSource,
+		resourcewebhookendpoint.NewWebhookEndpointsDataSource,
+		resourcewebhookendpoint.NewWebhookEventTypesDataSource,
 		resourcemcptunnel.NewMcpTunnelDataSource,
 		resourceinvite.NewInviteDataSource,
 		resourceinvite.NewInvitesDataSource,

@@ -7,6 +7,17 @@ document="${2:?SPDX document path is required}"
 release_tools="${RELEASE_TOOLS_DIR:?authenticated release tools are required}"
 action_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+sha256_digest() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    echo "No SHA-256 utility is available" >&2
+    return 1
+  fi
+}
+
 "${release_tools}/syft" \
   --config "${action_dir}/syft.yaml" \
   "file:${archive}" \
@@ -31,8 +42,7 @@ modules="$(
     awk -F '\t' '$2 == "dep" { print $3 "\t" $4 }' |
     jq -Rn '[inputs | split("\t") | {name: .[0], version: .[1]}]'
 )"
-archive_sha256="$(sha256sum "$archive")"
-archive_sha256="${archive_sha256%% *}"
+archive_sha256="$(sha256_digest "$archive")"
 
 jq -e \
   --arg archive "$(basename "$archive")" \

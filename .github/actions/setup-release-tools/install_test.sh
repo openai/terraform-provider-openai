@@ -61,4 +61,41 @@ assert_install_rejected() {
 assert_install_rejected tampered-archive 'SHA-256 mismatch'
 assert_install_rejected download-failure 'simulated release archive download failure'
 
-echo 'Release tool installation fails closed for tampered and unavailable archives.'
+portable_bin="${test_dir}/portable-bin"
+mkdir -p "$portable_bin"
+for command_name in awk bash env mktemp; do
+  ln -s "$(command -v "$command_name")" "${portable_bin}/${command_name}"
+done
+ln -s "${test_dir}/bin/curl" "${portable_bin}/curl"
+cat > "${portable_bin}/uname" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+  -s) printf 'Darwin\n' ;;
+  -m) printf 'arm64\n' ;;
+  *) exit 1 ;;
+esac
+EOF
+cat > "${portable_bin}/shasum" <<'EOF'
+#!/usr/bin/env bash
+test "$1" = -a
+test "$2" = 256
+printf '%064d  %s\n' 0 "$3"
+EOF
+chmod +x "${portable_bin}/uname" "${portable_bin}/shasum"
+
+portable_log="${test_dir}/portable-checksum.log"
+if PATH="$portable_bin" \
+  RELEASE_TOOL_TEST_MODE=tampered-archive \
+  RUNNER_TEMP="${test_dir}/runner" \
+  GITHUB_ENV="${test_dir}/portable-checksum.env" \
+  bash "${action_dir}/install.sh" > "$portable_log" 2>&1; then
+  echo "release tool installation unexpectedly accepted a tampered Darwin archive" >&2
+  exit 1
+fi
+if ! grep -Fq 'SHA-256 mismatch' "$portable_log"; then
+  cat "$portable_log" >&2
+  echo "release tool installation did not use the Darwin shasum fallback" >&2
+  exit 1
+fi
+
+echo 'Release tool installation fails closed and supports the Darwin shasum fallback.'

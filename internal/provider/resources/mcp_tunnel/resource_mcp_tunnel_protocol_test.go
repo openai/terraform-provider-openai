@@ -243,11 +243,13 @@ func tunnelResourceAndState(t *testing.T, baseURL string) (frameworkresource.Res
 	t.Helper()
 	ctx := context.Background()
 	managed := newTunnelResource(t)
+	providerData := openaiapi.NewProviderData()
+	providerData.SetClient("admin", &openaiapi.APIClient{
+		Client: openai.NewClient(option.WithAPIKey(tunnelTestAdminKey), option.WithBaseURL(baseURL+"/v1")),
+	})
 	var configured frameworkresource.ConfigureResponse
 	managed.(frameworkresource.ResourceWithConfigure).Configure(ctx, frameworkresource.ConfigureRequest{
-		ProviderData: &openaiapi.APIClient{
-			Client: openai.NewClient(option.WithAPIKey(tunnelTestAdminKey), option.WithBaseURL(baseURL+"/v1")),
-		},
+		ProviderData: providerData,
 	}, &configured)
 	if configured.Diagnostics.HasError() {
 		t.Fatalf("configure tunnel: %v", configured.Diagnostics)
