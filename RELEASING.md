@@ -1,14 +1,18 @@
 # Releasing
 
-This repository uses a two-stage release process:
+Releases are driven by Release Please. Merging an approved release PR is the
+human approval step:
 
-1. `release-please` creates and updates a release PR from Conventional Commits.
-2. A maintainer publishes provider artifacts through the protected `publish` environment.
+1. Release Please maintains the changelog and version manifest in a release PR.
+2. After merge, the SDK GitHub App creates the version tag at that release
+   commit and a draft GitHub Release with the release notes.
+3. The tag starts `Release`, which verifies, signs, attests, and publishes the
+   provider artifacts through the `publish` environment.
 
-The release PR updates `CHANGELOG.md` and `.release-please-manifest.json`. The
-release-please workflow intentionally uses `skip-github-release: true`; it does
-not create tags or GitHub Releases automatically. Artifact publication remains
-an explicit, protected tag-triggered step.
+`draft: true` keeps incomplete artifacts out of the Registry.
+`force-tag-creation: true` is also required: GitHub does not normally create a
+Git tag for a draft release until publication. The App token allows the tag
+creation to trigger the separate workflow; the default `GITHUB_TOKEN` would not.
 
 ## Provider Name
 
@@ -37,7 +41,7 @@ Provider consumers do not install directly from the Go source repository in norm
 
 Terraform provider registries require signed provider checksums. The public Terraform Registry and HCP Terraform private registry both rely on GPG signatures for provider packages.
 
-The release workflow reads signing credentials from the protected GitHub Actions environment named `publish`, not from repository-level secrets. Configure that environment with required reviewers or other protection rules before publishing.
+The release workflow reads signing credentials from the protected GitHub Actions environment named `publish`, not from repository-level secrets. Restrict that environment to release tags as described below; release-PR code-owner review provides approval without a second manual deployment approval.
 
 The `publish` environment must define these environment secrets:
 
@@ -48,35 +52,44 @@ To publish a provider version:
 
 1. Verify the release PR's title, changelog, and manifest agree on a version
    that has not already been published, then merge the reviewed release-please PR.
-2. Tag that exact merge commit with its manifest version, rather than tagging
-   whatever commit happens to be checked out. For example, for a release PR
-   recording version `1.1.1`, substitute its verified full merge SHA below:
-
-   ```sh
-   git tag v1.1.1 <release-pr-merge-sha>
-   git push origin v1.1.1
-   ```
+2. Confirm the Release Please run creates the tag and draft automatically, then
+   follow the tag-triggered `Release` run through publication and Registry
+   ingestion. No manual tag push is part of the normal process.
 
 Before building release artifacts, the workflow requires the tag to match the
 committed manifest and changelog and to point at the matching merged release PR
 in public `main`. A mismatch fails before signing credentials are accessed.
+After snapshot verification, the publication job requires the Release Please
+draft at that same commit before using signing credentials. Draft lookup uses
+the publisher's existing contents-write token; the snapshot job stays read-only.
 
-Release-please uses `autorelease: pending` to discover and update release PRs;
-keep labeling enabled. After the protected publication job succeeds, a separate
-job verifies that the release is public and replaces that PR's pending label
-with `autorelease: tagged`, preserving unrelated labels. This job has no signing
-credentials. Failed publication retains pending status and blocks another
-release PR. If label completion fails after successful publication, rerun only
-the failed job; completion is idempotent. Do not rerun the successful publication
-job or move an existing version tag. The next push to `main` lets release-please
-prepare subsequent changes once pending status has cleared.
+Release Please owns its `autorelease: pending` → `autorelease: tagged` label
+transition when it creates the tag and draft. Tagged does not mean published.
+After verified artifact publication, a separate job adds `autorelease: published`
+without changing Release Please's labels or unrelated labels. Failed publication
+leaves the release as a draft and does not receive the published label.
+
+For a transient failure before artifact upload, rerun only the failed jobs of
+the original release run. If Release Please created the tag but failed to create
+the draft, rerun its failed job first, then rerun the failed Release jobs; do not
+move the tag or fabricate an empty draft. After any artifacts have uploaded, a
+retry can fail on duplicate assets: first verify the release is still an unpublished draft,
+then deliberately remove its incomplete asset set before retrying. Preserve
+the draft's release notes and the immutable tag; never remove or replace assets
+of a published release. A repository code/configuration fix requires a new
+reviewed version because retrying an old run still uses its tagged source.
+
+If label completion fails after successful publication, rerun only that job;
+completion is idempotent. Do not rerun a successful publication job. Subsequent
+pushes can let Release Please prepare another version; check the prior release's
+publication status before merging another release PR.
 
 If an already-published version is missing from the manifest or changelog,
 reconcile those files in a reviewed PR using the existing tag's actual commit
 range and publication date. Never move tags or replace published artifacts to
 repair bookkeeping, and never include later changes in a historical entry.
 
-The `Release` workflow waits for the `publish` environment checks, imports the GPG key from environment secrets, and runs GoReleaser. GoReleaser builds OS/architecture zip files, generates an SPDX JSON software bill of materials (SBOM) for each zip, includes `terraform-registry-manifest.json`, and creates a draft GitHub Release. GoReleaser limits its checksum inventory to provider archives and the Registry manifest, including when it refreshes checksums after signing. The trusted release verifier snapshots each adjacent SBOM, validates the complete archive/SBOM inventory, then signs two inventories: `terraform-provider-openai_VERSION_SHA256SUMS` contains only provider ZIPs and the Registry manifest, while `terraform-provider-openai_VERSION_sbom_checksums.txt` contains the SBOMs. Both have detached `.sig` signatures from the same release key. SBOM entries must not appear in the Registry checksum file: Registry ingestion rejects those entries as missing from its request even when the SBOM files exist on GitHub. The approved publishing job generates GitHub OIDC-backed build-provenance attestations for both signed inventories, covering every provider archive, SBOM, and Registry manifest. It verifies every provider archive's attestation against this repository, release workflow, version tag, and source commit before publishing the draft. A missing, invalid, or mismatched attestation blocks publication.
+The `Release` workflow waits for the `publish` environment checks, imports the GPG key from environment secrets, and runs GoReleaser. GoReleaser builds OS/architecture zip files, generates an SPDX JSON software bill of materials (SBOM) for each zip, includes `terraform-registry-manifest.json`, and uploads them to Release Please's existing draft, preserving its release notes. GoReleaser limits its checksum inventory to provider archives and the Registry manifest, including when it refreshes checksums after signing. The trusted release verifier snapshots each adjacent SBOM, validates the complete archive/SBOM inventory, then signs two inventories: `terraform-provider-openai_VERSION_SHA256SUMS` contains only provider ZIPs and the Registry manifest, while `terraform-provider-openai_VERSION_sbom_checksums.txt` contains the SBOMs. Both have detached `.sig` signatures from the same release key. SBOM entries must not appear in the Registry checksum file: Registry ingestion rejects those entries as missing from its request even when the SBOM files exist on GitHub. The publishing job generates GitHub OIDC-backed build-provenance attestations for both signed inventories, covering every provider archive, SBOM, and Registry manifest. It verifies every provider archive's attestation against this repository, release workflow, version tag, and source commit before publishing the draft. A missing, invalid, or mismatched attestation blocks publication.
 
 CI builds a snapshot release and verifies every provider ZIP checksum and its adjacent SBOM against the exact archive contents and dependency inventory. Offline signing and publication regressions exercise the split inventories; the publication gate downloads and verifies both signed checksum files and all referenced artifacts before making the draft public. The tag-triggered `Release` workflow runs the same `Release SBOM` verification before its publish job, so a release cannot be published if that check fails. Both the snapshot and publish jobs first verify their own checked-out provider dependencies before building artifacts.
 
@@ -87,7 +100,15 @@ finalized GitHub Releases.
 
 ## Release Security
 
-The `publish` environment approval is the security boundary for release signing and OIDC-backed provenance. Before approving a release job, reviewers should verify that the tag points at the intended reviewed commit and that the release workflow and `.goreleaser.yml` at that commit are expected. Only this approved job receives `id-token: write` and `attestations: write`; the preceding snapshot-verification job remains read-only. Terraform Registry still requires GPG-signed provider checksums, so the GitHub attestation supplements rather than replaces the GPG signature.
+Required code-owner review and checks on the release PR authorize publication.
+The tag must point to that exact merged release commit, and the release workflow
+and `.goreleaser.yml` are covered by `@openai/sdks-team` ownership. The
+`publish` environment isolates GPG secrets and is restricted to `v*` tags; it
+does not require another manual approval. Only its publishing job receives
+`id-token: write` and `attestations: write`; the preceding snapshot-verification
+job remains read-only. Terraform Registry still requires GPG-signed provider
+checksums, so the GitHub attestation supplements rather than replaces the GPG
+signature.
 
 Each release job first installs pinned GoReleaser and Syft release archives and authenticates each archive against a SHA-256 digest committed in `.github/actions/setup-release-tools/install.sh`. Tool installation fails closed if an archive cannot be downloaded, does not match its reviewed digest, or does not contain the expected executable; no mutable upstream installers or unauthenticated tool caches are used.
 
@@ -101,9 +122,24 @@ Before GoReleaser can checksum or sign any SBOM, the same script verifies its SP
 
 When changing provider dependencies, run `go mod tidy` during normal development, commit the resulting `go.mod` and `go.sum` together, and verify them locally with `go mod download`, `go mod verify`, and `git diff --exit-code -- go.mod go.sum`. When upgrading Go, GoReleaser, or Syft, update the applicable pinned version and every supported platform's reviewed SHA-256 digest, review both the trusted release execution and Syft policies against the new versions, then run the authentication, hostile-Go/Git-environment, and adversarial full-release SBOM regressions. Never add dependency-mutating hooks to `.goreleaser.yml`, allow inherited Go execution flags, executable Git configuration, or ambient Syft configuration, skip per-artifact verification before signing, enable remote SBOM enrichment, install tools after the final verification, restore a compiled build cache after verification, or import signing credentials before this boundary.
 
-Recommended repository settings:
+## Repository setup
 
-- Protect tags matching `v*`.
-- Restrict who can create matching release tags.
-- Require reviewers on the `publish` environment.
+The workflow configuration and live GitHub settings must agree. Before enabling
+automatic releases, configure and read back these settings:
+
+- Require `@openai/sdks-team` code-owner review and CI before release PRs merge.
+- Keep `release` restricted to `main`, with the SDK App credential scoped to that
+  environment and contents/pull-request write permissions.
+- Permit the SDK GitHub App to create `v*` tags. Keep tag update/deletion
+  restrictions in a separate ruleset without an App bypass, so creation
+  permission does not allow changing existing releases. Preserve existing
+  maintainer access.
+- Restrict `publish` to tags matching `v*`, remove its additional required-reviewer
+  rule, and preserve its environment secrets. The release-PR review and exact
+  merge-commit verification supply the approval boundary.
 - Store `GPG_PRIVATE_KEY` and `PASSPHRASE` only as `publish` environment secrets.
+
+These are repository-admin settings, not changes a workflow YAML file can apply.
+The first release after setup must verify automatic tag/draft creation, the
+triggered Release run, both signed inventories, provenance, and Registry
+installation. Never publish an empty release to test this path.

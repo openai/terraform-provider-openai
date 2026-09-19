@@ -88,6 +88,31 @@ class ReleaseTrackingTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "exactly one"):
                     tracking.release_pull_request(TAG, SHA)
 
+    def test_publication_requires_a_draft_at_the_release_commit(self):
+        draft = {"tag_name": TAG, "draft": True, "target_commitish": SHA}
+        with patch.object(tracking, "github_api", return_value=[[], [draft]]) as api:
+            tracking.verify_draft(TAG, SHA)
+            api.assert_called_once_with("GET", "releases?per_page=100", paginate=True)
+        for pages in [[], [[draft, draft]], [[draft | {"tag_name": "v9.9.9"}]]]:
+            with self.subTest(pages=pages):
+                with patch.object(tracking, "github_api", return_value=pages):
+                    with self.assertRaisesRegex(ValueError, "exactly one draft"):
+                        tracking.verify_draft(TAG, SHA)
+        for mutation in [
+            {"draft": False},
+            {"target_commitish": "main"},
+            {"target_commitish": "b" * 40},
+        ]:
+            with self.subTest(mutation=mutation):
+                with patch.object(
+                    tracking, "github_api", return_value=[[draft | mutation]]
+                ):
+                    with self.assertRaisesRegex(ValueError, "draft at the verified"):
+                        tracking.verify_draft(TAG, SHA)
+        with patch.object(tracking, "github_api", side_effect=ValueError("API failed")):
+            with self.assertRaisesRegex(ValueError, "API failed"):
+                tracking.verify_draft(TAG, SHA)
+
     def test_unpublished_release_never_changes_labels(self):
         for release in [
             {"tag_name": TAG, "draft": True, "published_at": None},
@@ -100,13 +125,13 @@ class ReleaseTrackingTest(unittest.TestCase):
                         tracking.complete_release(TAG, release_pr())
                     api.assert_called_once_with("GET", f"releases/tags/{TAG}")
 
-    def test_label_transition_preserves_unrelated_labels_and_retries(self):
+    def test_publication_preserves_release_please_labels_and_retries(self):
         published = {"tag_name": TAG, "draft": False, "published_at": "date"}
         endpoint = "issues/56/labels"
         for existing in [
-            [tracking.PENDING, "documentation"],
-            [tracking.PENDING, tracking.TAGGED, "documentation"],
-            [tracking.TAGGED, "documentation"],
+            ["autorelease: tagged", "documentation"],
+            ["autorelease: tagged", tracking.PUBLISHED, "documentation"],
+            ["autorelease: pending", "documentation"],
         ]:
             with self.subTest(existing=existing):
                 with patch.object(tracking, "github_api") as api:
@@ -121,19 +146,15 @@ class ReleaseTrackingTest(unittest.TestCase):
                         call("GET", f"releases/tags/{TAG}"),
                         call("GET", endpoint + "?per_page=100", paginate=True),
                     ]
-                    if tracking.TAGGED not in existing:
+                    if tracking.PUBLISHED not in existing:
                         expected.append(
-                            call("POST", endpoint, {"labels": [tracking.TAGGED]})
-                        )
-                    if tracking.PENDING in existing:
-                        expected.append(
-                            call("DELETE", endpoint + "/autorelease%3A%20pending")
+                            call("POST", endpoint, {"labels": [tracking.PUBLISHED]})
                         )
                     self.assertEqual(api.call_args_list, expected)
         with patch.object(tracking, "github_api") as api:
             api.side_effect = [
                 published,
-                [[{"name": tracking.PENDING}]],
+                [[{"name": "autorelease: tagged"}]],
                 ValueError("API failed"),
             ]
             with self.assertRaisesRegex(ValueError, "API failed"):
@@ -158,6 +179,17 @@ class ReleaseTrackingTest(unittest.TestCase):
             gate, workflow.index("uses: ./.github/actions/verify-release-sboms")
         )
         self.assertIn("needs: release-sbom", workflow)
+        snapshot_job, publisher = workflow.split("  goreleaser:\n", 1)
+        self.assertIn("contents: read", snapshot_job)
+        self.assertNotIn("contents: write", snapshot_job.split("  release-sbom:", 1)[1])
+        self.assertIn("contents: write", publisher)
+        self.assertNotIn("release_tracking.py verify-draft", snapshot_job)
+        self.assertLess(
+            publisher.index("release_tracking.py verify-draft"),
+            publisher.index("name: Check publish environment secrets"),
+        )
+        self.assertNotIn("secrets.", snapshot_job)
+        self.assertIn("needs: release-sbom", publisher)
         completion = workflow.split("  complete-release:\n", 1)[1]
         self.assertIn("needs: goreleaser", completion)
         self.assertNotIn("always()", completion)
@@ -165,7 +197,20 @@ class ReleaseTrackingTest(unittest.TestCase):
         self.assertIn("pull-requests: write", completion)
         please = (root / ".github/workflows/release-please.yml").read_text()
         self.assertNotIn("skip-labeling: true", please)
-        self.assertIn("skip-github-release: true", please)
+        self.assertNotIn("skip-github-release: true", please)
+        # A draft alone does not create a tag and would strand publication.
+        config = json.loads((root / "release-please-config.json").read_text())
+        package = config["packages"]["."]
+        self.assertIs(package["draft"], True)
+        self.assertIs(package["force-tag-creation"], True)
+        self.assertIn("token: ${{ steps.app-token.outputs.token }}", please)
+        goreleaser = (root / ".goreleaser.yml").read_text()
+        self.assertIn("use_existing_draft: true", goreleaser)
+        self.assertIn('goreleaser" release --clean --draft', workflow)
+        self.assertLess(
+            workflow.index("--source-digest"),
+            workflow.index('release-verifier --publish "$GITHUB_REF_NAME"'),
+        )
 
     def test_completion_is_restricted_to_public_tag_events(self):
         with patch.dict(os.environ, {"GITHUB_REPOSITORY": "other/repo"}, clear=True):

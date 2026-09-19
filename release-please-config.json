@@ -6,6 +6,8 @@
       "package-name": "terraform-provider-openai",
       "changelog-path": "CHANGELOG.md",
       "include-component-in-tag": false,
+      "draft": true,
+      "force-tag-creation": true,
       "initial-version": "0.1.0"
     }
   }
