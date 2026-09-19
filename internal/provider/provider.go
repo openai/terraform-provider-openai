@@ -119,6 +119,7 @@ func (p *OpenAIProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		clientConfig.AdminAPIKey = value
 	}
 
+	credentialAPIKeyFromEnvironment := false
 	if data.APIKey.IsUnknown() {
 		resp.Diagnostics.AddError("Unknown OpenAI credential", "The api_key provider attribute must be known during provider configuration; omit it to use OPENAI_API_KEY.")
 		return
@@ -127,6 +128,7 @@ func (p *OpenAIProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		clientConfig.APIKey = data.APIKey.ValueString()
 	} else if value, ok := os.LookupEnv("OPENAI_API_KEY"); ok {
 		clientConfig.APIKey = value
+		credentialAPIKeyFromEnvironment = true
 	}
 
 	if !data.BaseURL.IsNull() && !data.BaseURL.IsUnknown() {
@@ -150,6 +152,14 @@ func (p *OpenAIProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	if err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API base URL", err.Error())
 		return
+	}
+	if credentialAPIKeyFromEnvironment && !isDefaultOpenAIAPIOrigin(apiEndpoint) {
+		clientConfig.APIKey = ""
+		if strings.TrimSpace(clientConfig.AdminAPIKey) == "" {
+			resp.Diagnostics.AddError("Ambient OpenAI credential requires default origin", "OPENAI_API_KEY is only used with the default OpenAI API origin. Set the api_key provider attribute explicitly to authorize this credential audience for a custom base_url.")
+			return
+		}
+		resp.Diagnostics.AddWarning("Ignored ambient OpenAI credential", "OPENAI_API_KEY is only used with the default OpenAI API origin. Set the api_key provider attribute explicitly to authorize this credential audience for a custom base_url.")
 	}
 	if strings.TrimSpace(clientConfig.AdminAPIKey) == "" && strings.TrimSpace(clientConfig.APIKey) == "" {
 		resp.Diagnostics.AddError("Missing OpenAI API key", "Set admin_api_key, OPENAI_ADMIN_KEY, api_key, OPENAI_API_KEY.")

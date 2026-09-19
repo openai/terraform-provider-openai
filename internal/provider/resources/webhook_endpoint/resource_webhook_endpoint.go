@@ -80,6 +80,7 @@ func (r *WebhookEndpointResource) Schema(ctx context.Context, req resource.Schem
 				Sensitive:           true,
 				Validators: []validator.String{
 					openaiapi.StringLengthAtLeast(1),
+					openaiapi.StringIsHTTPSURL(),
 				},
 			},
 			"event_types": schema.SetAttribute{

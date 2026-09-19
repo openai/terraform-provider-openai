@@ -20,6 +20,10 @@ The provider accepts separate credentials for its two API audiences:
   must belong to a project owner and allow `api.webhooks.read` and
   `api.webhooks.write` for full lifecycle management.
 
+`OPENAI_API_KEY` is used only with the default OpenAI API origin. When setting a
+custom `base_url`, set `api_key` explicitly to authorize sending the project
+credential to that origin.
+
 Set one or both credentials according to the resources in your configuration:
 
 ```sh

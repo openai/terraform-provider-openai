@@ -12,7 +12,10 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	frameworkresource "github.com/hashicorp/terraform-plugin-framework/resource"
+	resourceschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	schemavalidator "github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	openai "github.com/openai/openai-go/v3"
@@ -82,6 +85,42 @@ func webhookEndpointModel(name string, secret types.String) WebhookEndpointResou
 		UpdatedAt:         types.Int64Unknown(),
 		SigningSecretHint: types.StringUnknown(),
 		SigningSecret:     secret,
+	}
+}
+
+func TestWebhookEndpointURLRequiresHTTPS(t *testing.T) {
+	managed := NewWebhookEndpointResource().(*WebhookEndpointResource)
+	var schemaResponse frameworkresource.SchemaResponse
+	managed.Schema(context.Background(), frameworkresource.SchemaRequest{}, &schemaResponse)
+	urlAttribute, ok := schemaResponse.Schema.Attributes["url"].(resourceschema.StringAttribute)
+	if !ok {
+		t.Fatalf("url attribute has unexpected schema type %T", schemaResponse.Schema.Attributes["url"])
+	}
+
+	tests := []struct {
+		name      string
+		value     string
+		wantError bool
+	}{
+		{name: "HTTPS URL", value: "https://example.com/openai/webhooks"},
+		{name: "HTTP URL", value: "http://example.com/openai/webhooks", wantError: true},
+		{name: "relative URL", value: "/openai/webhooks", wantError: true},
+		{name: "missing host", value: "https:///openai/webhooks", wantError: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := schemavalidator.StringRequest{
+				Path:        path.Root("url"),
+				ConfigValue: types.StringValue(test.value),
+			}
+			var response schemavalidator.StringResponse
+			for _, configuredValidator := range urlAttribute.Validators {
+				configuredValidator.ValidateString(context.Background(), request, &response)
+			}
+			if gotError := response.Diagnostics.HasError(); gotError != test.wantError {
+				t.Fatalf("URL validation error = %t, want %t: %v", gotError, test.wantError, response.Diagnostics)
+			}
+		})
 	}
 }
 

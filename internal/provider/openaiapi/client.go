@@ -1603,6 +1603,31 @@ func (v stringIsValidPathParameterValidator) ValidateString(ctx context.Context,
 	}
 }
 
+type stringIsHTTPSURLValidator struct{}
+
+func StringIsHTTPSURL() validator.String {
+	return stringIsHTTPSURLValidator{}
+}
+
+func (v stringIsHTTPSURLValidator) Description(ctx context.Context) string {
+	return "value must be an absolute HTTPS URL"
+}
+
+func (v stringIsHTTPSURLValidator) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+func (v stringIsHTTPSURLValidator) ValidateString(ctx context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	value := req.ConfigValue.ValueString()
+	endpoint, err := url.Parse(value)
+	if err != nil || !endpoint.IsAbs() || endpoint.Scheme != "https" || endpoint.Hostname() == "" {
+		resp.Diagnostics.AddAttributeError(req.Path, "Invalid HTTPS URL", "Value must be an absolute URL beginning with https://.")
+	}
+}
+
 type stringOneOfValidator struct {
 	values []string
 }

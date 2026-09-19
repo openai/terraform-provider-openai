@@ -349,6 +349,67 @@ func TestProviderRejectsUnknownCredentialsWithoutEnvironmentFallback(t *testing.
 	}
 }
 
+func TestProviderBindsAmbientProjectCredentialToDefaultOpenAIOrigin(t *testing.T) {
+	tests := []struct {
+		name         string
+		baseURL      string
+		explicit     bool
+		wantAudience bool
+	}{
+		{name: "default OpenAI origin", wantAudience: true},
+		{name: "canonical default OpenAI origin", baseURL: "https://API.OPENAI.COM:443/v1", explicit: true, wantAudience: true},
+		{name: "custom HTTPS origin", baseURL: "https://proxy.example.com/v1", explicit: true},
+		{name: "default host alternate port", baseURL: "https://api.openai.com:8443/v1", explicit: true},
+		{name: "loopback origin", baseURL: "http://127.0.0.1:8080/v1", explicit: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := configureProviderWithAttributeValues(
+				t,
+				test.baseURL,
+				test.explicit,
+				map[string]tftypes.Value{
+					"admin_api_key": tftypes.NewValue(tftypes.String, "synthetic-support-credential"),
+				},
+				map[string]string{"OPENAI_API_KEY": "synthetic-ambient-credential"},
+			)
+			if response.Diagnostics.HasError() {
+				t.Fatalf("provider configuration failed: %v", response.Diagnostics)
+			}
+			providerData, ok := response.ResourceData.(*openaiapi.ProviderData)
+			if !ok {
+				t.Fatalf("provider data has unexpected type %T", response.ResourceData)
+			}
+			if _, ok := providerData.Client("admin"); !ok {
+				t.Fatal("custom-origin configuration lost its explicitly configured support audience")
+			}
+			_, gotAudience := providerData.Client("project")
+			if gotAudience != test.wantAudience {
+				t.Fatalf("ambient credential audience available = %t, want %t", gotAudience, test.wantAudience)
+			}
+		})
+	}
+}
+
+func TestProviderRejectsAmbientProjectCredentialAtCustomOriginWithoutAnotherAudience(t *testing.T) {
+	response := configureProviderWithAttributeValues(
+		t,
+		"https://proxy.example.com/v1",
+		true,
+		nil,
+		map[string]string{"OPENAI_API_KEY": "synthetic-ambient-credential"},
+	)
+	if !response.Diagnostics.HasError() {
+		t.Fatal("provider configuration unexpectedly accepted an ambient credential at a custom origin")
+	}
+	if response.ResourceData != nil || response.DataSourceData != nil {
+		t.Fatal("rejected ambient credential received provider data")
+	}
+	if !strings.Contains(fmt.Sprint(response.Diagnostics), "Ambient OpenAI credential requires default origin") {
+		t.Fatalf("unexpected configuration diagnostic: %v", response.Diagnostics)
+	}
+}
+
 func TestProviderRoutesCredentialsByAudience(t *testing.T) {
 	receivedAuthorization := map[string]string{}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
