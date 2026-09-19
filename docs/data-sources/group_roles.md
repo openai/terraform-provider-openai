@@ -4,11 +4,14 @@ page_title: "openai_group_roles Data Source - openai"
 subcategory: ""
 description: |-
   List organization-level roles for a group.
+  Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 ---
 
 # openai_group_roles (Data Source)
 
 List organization-level roles for a group.
+
+Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 
 ## Example Usage
 

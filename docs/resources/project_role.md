@@ -4,11 +4,14 @@ page_title: "openai_project_role Resource - openai"
 subcategory: ""
 description: |-
   Manage a project role.
+  Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 ---
 
 # openai_project_role (Resource)
 
 Manage a project role.
+
+Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 
 ## Example Usage
 

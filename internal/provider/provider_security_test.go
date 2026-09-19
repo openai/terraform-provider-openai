@@ -410,6 +410,28 @@ func TestProviderRejectsAmbientProjectCredentialAtCustomOriginWithoutAnotherAudi
 	}
 }
 
+func TestProviderTreatsBlankAmbientProjectCredentialAsMissing(t *testing.T) {
+	for _, value := range []string{"", "   "} {
+		response := configureProviderWithAttributeValues(
+			t,
+			"https://proxy.example.com/v1",
+			true,
+			nil,
+			map[string]string{"OPENAI_API_KEY": value},
+		)
+		if !response.Diagnostics.HasError() {
+			t.Fatal("provider configuration unexpectedly accepted a blank ambient credential")
+		}
+		diagnostics := fmt.Sprint(response.Diagnostics)
+		if !strings.Contains(diagnostics, "Missing OpenAI API key") {
+			t.Fatalf("blank ambient credential diagnostic = %v, want missing credential", response.Diagnostics)
+		}
+		if strings.Contains(diagnostics, "Ambient OpenAI credential requires default origin") {
+			t.Fatalf("blank ambient credential was incorrectly treated as origin-bound: %v", response.Diagnostics)
+		}
+	}
+}
+
 func TestProviderRoutesCredentialsByAudience(t *testing.T) {
 	receivedAuthorization := map[string]string{}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {

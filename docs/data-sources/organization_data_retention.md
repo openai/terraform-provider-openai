@@ -4,11 +4,14 @@ page_title: "openai_organization_data_retention Data Source - openai"
 subcategory: ""
 description: |-
   Retrieve organization data retention controls.
+  Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 ---
 
 # openai_organization_data_retention (Data Source)
 
 Retrieve organization data retention controls.
+
+Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 
 ## Example Usage
 

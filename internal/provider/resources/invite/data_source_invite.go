@@ -43,7 +43,7 @@ func (d *InviteDataSource) Metadata(ctx context.Context, req datasource.Metadata
 
 func (d *InviteDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Look up an organization invite by ID.",
+		MarkdownDescription: "Look up an organization invite by ID.\n\nAuthentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.",
 		Attributes: map[string]schema.Attribute{
 			"invite_id": schema.StringAttribute{
 				MarkdownDescription: "invite id",
@@ -129,7 +129,7 @@ func (d *InviteDataSource) Configure(ctx context.Context, req datasource.Configu
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Missing OpenAI credential for admin API",
-			"Configure the provider with a credential for the admin API audience before using openai_invite.",
+			"Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience before using openai_invite. Credentials are not reused across API audiences.",
 		)
 		return
 	}

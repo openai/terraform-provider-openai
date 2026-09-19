@@ -4,11 +4,14 @@ page_title: "openai_projects Data Source - openai"
 subcategory: ""
 description: |-
   List organization projects.
+  Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 ---
 
 # openai_projects (Data Source)
 
 List organization projects.
+
+Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 
 ## Example Usage
 

@@ -4,11 +4,14 @@ page_title: "openai_organization_users Data Source - openai"
 subcategory: ""
 description: |-
   List organization users.
+  Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 ---
 
 # openai_organization_users (Data Source)
 
 List organization users.
+
+Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 
 ## Example Usage
 

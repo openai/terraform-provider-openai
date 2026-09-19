@@ -41,7 +41,7 @@ func (d *McpTunnelDataSource) Metadata(ctx context.Context, req datasource.Metad
 
 func (d *McpTunnelDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Retrieve an MCP tunnel registration by ID using an organization admin API key.",
+		MarkdownDescription: "Retrieve an MCP tunnel registration by ID using an organization admin API key.\n\nAuthentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "Tunnel identifier.",
@@ -116,7 +116,7 @@ func (d *McpTunnelDataSource) Configure(ctx context.Context, req datasource.Conf
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Missing OpenAI credential for admin API",
-			"Configure the provider with a credential for the admin API audience before using openai_mcp_tunnel.",
+			"Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience before using openai_mcp_tunnel. Credentials are not reused across API audiences.",
 		)
 		return
 	}

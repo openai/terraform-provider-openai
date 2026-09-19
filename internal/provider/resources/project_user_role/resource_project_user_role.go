@@ -46,7 +46,7 @@ func (r *ProjectUserRoleResource) Metadata(ctx context.Context, req resource.Met
 
 func (r *ProjectUserRoleResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manage a project-level role assignment for a user. Built-in project role IDs are `role-api-project-member`, `role-api-project-owner`, and `role-api-project-viewer`. Use the `openai_project_roles` data source to discover the roles available to a project dynamically.",
+		MarkdownDescription: "Manage a project-level role assignment for a user. Built-in project role IDs are `role-api-project-member`, `role-api-project-owner`, and `role-api-project-viewer`. Use the `openai_project_roles` data source to discover the roles available to a project dynamically.\n\nAuthentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.",
 		Attributes: map[string]schema.Attribute{
 			"project_id": schema.StringAttribute{
 				MarkdownDescription: "project id",
@@ -152,7 +152,7 @@ func (r *ProjectUserRoleResource) Configure(ctx context.Context, req resource.Co
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Missing OpenAI credential for admin API",
-			"Configure the provider with a credential for the admin API audience before using openai_project_user_role.",
+			"Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience before using openai_project_user_role. Credentials are not reused across API audiences.",
 		)
 		return
 	}

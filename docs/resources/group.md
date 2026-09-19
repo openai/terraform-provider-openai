@@ -4,11 +4,14 @@ page_title: "openai_group Resource - openai"
 subcategory: ""
 description: |-
   Manage an organization group.
+  Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 ---
 
 # openai_group (Resource)
 
 Manage an organization group.
+
+Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 
 ## Example Usage
 

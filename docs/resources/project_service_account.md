@@ -4,11 +4,14 @@ page_title: "openai_project_service_account Resource - openai"
 subcategory: ""
 description: |-
   Manage a project service account. This resource sets create_service_account_only=true and creates only the service account; it does not assign roles or create an API key. Manage role assignments using separate Terraform resources, and create and manage API keys outside Terraform using the public API.
+  Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 ---
 
 # openai_project_service_account (Resource)
 
 Manage a project service account. This resource sets `create_service_account_only=true` and creates only the service account; it does not assign roles or create an API key. Manage role assignments using separate Terraform resources, and create and manage API keys outside Terraform using the public API.
+
+Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 
 ## Example Usage
 

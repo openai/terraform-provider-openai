@@ -4,11 +4,14 @@ page_title: "openai_organization_user Data Source - openai"
 subcategory: ""
 description: |-
   Look up an organization user by ID.
+  Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 ---
 
 # openai_organization_user (Data Source)
 
 Look up an organization user by ID.
+
+Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 
 ## Example Usage
 

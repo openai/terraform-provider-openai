@@ -40,7 +40,7 @@ func (d *ProjectModelPermissionsDataSource) Metadata(ctx context.Context, req da
 
 func (d *ProjectModelPermissionsDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Retrieve project model permissions.",
+		MarkdownDescription: "Retrieve project model permissions.\n\nAuthentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.",
 		Attributes: map[string]schema.Attribute{
 			"project_id": schema.StringAttribute{
 				MarkdownDescription: "project id",
@@ -106,7 +106,7 @@ func (d *ProjectModelPermissionsDataSource) Configure(ctx context.Context, req d
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Missing OpenAI credential for admin API",
-			"Configure the provider with a credential for the admin API audience before using openai_project_model_permissions.",
+			"Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience before using openai_project_model_permissions. Credentials are not reused across API audiences.",
 		)
 		return
 	}

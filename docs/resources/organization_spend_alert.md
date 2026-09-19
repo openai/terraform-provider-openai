@@ -4,11 +4,14 @@ page_title: "openai_organization_spend_alert Resource - openai"
 subcategory: ""
 description: |-
   Manage an organization spend alert.
+  Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 ---
 
 # openai_organization_spend_alert (Resource)
 
 Manage an organization spend alert.
+
+Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 
 ## Example Usage
 

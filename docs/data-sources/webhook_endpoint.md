@@ -3,12 +3,15 @@
 page_title: "openai_webhook_endpoint Data Source - openai"
 subcategory: ""
 description: |-
-  Retrieve a project webhook endpoint by ID using a project API key.
+  Beta. Retrieve a webhook endpoint by ID in the authenticated project using the api_key provider attribute or OPENAI_API_KEY. Requires api.webhooks.read; an organization Admin API key is not accepted.
+  Authentication: Set the api_key provider attribute or OPENAI_API_KEY environment variable for the project API audience.
 ---
 
 # openai_webhook_endpoint (Data Source)
 
-Retrieve a project webhook endpoint by ID using a project API key.
+Beta. Retrieve a webhook endpoint by ID in the authenticated project using the `api_key` provider attribute or `OPENAI_API_KEY`. Requires `api.webhooks.read`; an organization Admin API key is not accepted.
+
+Authentication: Set the api_key provider attribute or OPENAI_API_KEY environment variable for the project API audience.
 
 ## Example Usage
 
@@ -27,11 +30,11 @@ data "openai_webhook_endpoint" "example" {
 
 ### Read-Only
 
-- `created_at` (Number) created at
-- `event_types` (Set of String) event types
-- `name` (String) name
-- `object` (String) object
+- `created_at` (Number) Unix timestamp when the endpoint was created.
+- `event_types` (Set of String) Event types delivered to this endpoint.
+- `name` (String) Human-readable webhook endpoint name.
+- `object` (String) API object type.
 - `response_json` (String, Sensitive) Raw JSON response returned by the OpenAI API.
-- `signing_secret_hint` (String) signing secret hint
-- `updated_at` (Number) updated at
-- `url` (String, Sensitive) url
+- `signing_secret_hint` (String) Redacted hint for the endpoint signing secret.
+- `updated_at` (Number) Unix timestamp when the endpoint was last updated.
+- `url` (String, Sensitive) HTTPS URL that receives webhook events.

@@ -4,11 +4,14 @@ page_title: "openai_certificate Resource - openai"
 subcategory: ""
 description: |-
   Manage an organization certificate.
+  Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 ---
 
 # openai_certificate (Resource)
 
 Manage an organization certificate.
+
+Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 
 ## Example Usage
 

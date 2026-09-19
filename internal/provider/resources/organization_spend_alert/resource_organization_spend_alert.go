@@ -46,7 +46,7 @@ func (r *OrganizationSpendAlertResource) Metadata(ctx context.Context, req resou
 
 func (r *OrganizationSpendAlertResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manage an organization spend alert.",
+		MarkdownDescription: "Manage an organization spend alert.\n\nAuthentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.",
 		Attributes: map[string]schema.Attribute{
 			"alert_id": schema.StringAttribute{
 				MarkdownDescription: "alert id",
@@ -143,7 +143,7 @@ func (r *OrganizationSpendAlertResource) Configure(ctx context.Context, req reso
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Missing OpenAI credential for admin API",
-			"Configure the provider with a credential for the admin API audience before using openai_organization_spend_alert.",
+			"Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience before using openai_organization_spend_alert. Credentials are not reused across API audiences.",
 		)
 		return
 	}

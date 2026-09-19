@@ -41,7 +41,7 @@ func (d *CertificateDataSource) Metadata(ctx context.Context, req datasource.Met
 
 func (d *CertificateDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Look up an organization certificate by ID.",
+		MarkdownDescription: "Look up an organization certificate by ID.\n\nAuthentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.",
 		Attributes: map[string]schema.Attribute{
 			"certificate_id": schema.StringAttribute{
 				MarkdownDescription: "certificate id",
@@ -113,7 +113,7 @@ func (d *CertificateDataSource) Configure(ctx context.Context, req datasource.Co
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Missing OpenAI credential for admin API",
-			"Configure the provider with a credential for the admin API audience before using openai_certificate.",
+			"Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience before using openai_certificate. Credentials are not reused across API audiences.",
 		)
 		return
 	}

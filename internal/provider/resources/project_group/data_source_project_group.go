@@ -41,7 +41,7 @@ func (d *ProjectGroupDataSource) Metadata(ctx context.Context, req datasource.Me
 
 func (d *ProjectGroupDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Look up a group assignment to a project. Role assignments are not represented by this data source; use openai_project_group_roles to list them.",
+		MarkdownDescription: "Look up a group assignment to a project. Role assignments are not represented by this data source; use openai_project_group_roles to list them.\n\nAuthentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.",
 		Attributes: map[string]schema.Attribute{
 			"project_id": schema.StringAttribute{
 				MarkdownDescription: "project id",
@@ -117,7 +117,7 @@ func (d *ProjectGroupDataSource) Configure(ctx context.Context, req datasource.C
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Missing OpenAI credential for admin API",
-			"Configure the provider with a credential for the admin API audience before using openai_project_group.",
+			"Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience before using openai_project_group. Credentials are not reused across API audiences.",
 		)
 		return
 	}

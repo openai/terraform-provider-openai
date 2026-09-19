@@ -4,11 +4,14 @@ page_title: "openai_project_group Data Source - openai"
 subcategory: ""
 description: |-
   Look up a group assignment to a project. Role assignments are not represented by this data source; use openai_project_group_roles to list them.
+  Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 ---
 
 # openai_project_group (Data Source)
 
 Look up a group assignment to a project. Role assignments are not represented by this data source; use openai_project_group_roles to list them.
+
+Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 
 ## Example Usage
 

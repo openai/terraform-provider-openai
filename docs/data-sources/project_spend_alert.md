@@ -4,11 +4,14 @@ page_title: "openai_project_spend_alert Data Source - openai"
 subcategory: ""
 description: |-
   Look up a project spend alert by ID.
+  Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 ---
 
 # openai_project_spend_alert (Data Source)
 
 Look up a project spend alert by ID.
+
+Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 
 ## Example Usage
 

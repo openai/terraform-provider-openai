@@ -44,7 +44,7 @@ func (r *OrganizationSpendLimitResource) Metadata(ctx context.Context, req resou
 
 func (r *OrganizationSpendLimitResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manage the organization hard spend limit.",
+		MarkdownDescription: "Manage the organization hard spend limit.\n\nAuthentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.",
 		Attributes: map[string]schema.Attribute{
 			"singleton_id": schema.StringAttribute{
 				MarkdownDescription: "singleton id",
@@ -120,7 +120,7 @@ func (r *OrganizationSpendLimitResource) Configure(ctx context.Context, req reso
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Missing OpenAI credential for admin API",
-			"Configure the provider with a credential for the admin API audience before using openai_organization_spend_limit.",
+			"Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience before using openai_organization_spend_limit. Credentials are not reused across API audiences.",
 		)
 		return
 	}

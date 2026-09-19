@@ -44,7 +44,7 @@ func (r *GroupResource) Metadata(ctx context.Context, req resource.MetadataReque
 
 func (r *GroupResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manage an organization group.",
+		MarkdownDescription: "Manage an organization group.\n\nAuthentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.",
 		Attributes: map[string]schema.Attribute{
 			"group_id": schema.StringAttribute{
 				MarkdownDescription: "group id",
@@ -120,7 +120,7 @@ func (r *GroupResource) Configure(ctx context.Context, req resource.ConfigureReq
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Missing OpenAI credential for admin API",
-			"Configure the provider with a credential for the admin API audience before using openai_group.",
+			"Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience before using openai_group. Credentials are not reused across API audiences.",
 		)
 		return
 	}

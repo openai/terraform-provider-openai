@@ -41,7 +41,7 @@ func (r *ProjectDataRetentionResource) Metadata(ctx context.Context, req resourc
 
 func (r *ProjectDataRetentionResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manage project data retention controls.",
+		MarkdownDescription: "Manage project data retention controls.\n\nAuthentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.",
 		Attributes: map[string]schema.Attribute{
 			"project_id": schema.StringAttribute{
 				MarkdownDescription: "project id",
@@ -94,7 +94,7 @@ func (r *ProjectDataRetentionResource) Configure(ctx context.Context, req resour
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Missing OpenAI credential for admin API",
-			"Configure the provider with a credential for the admin API audience before using openai_project_data_retention.",
+			"Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience before using openai_project_data_retention. Credentials are not reused across API audiences.",
 		)
 		return
 	}
