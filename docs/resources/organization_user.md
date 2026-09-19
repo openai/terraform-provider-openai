@@ -4,11 +4,14 @@ page_title: "openai_organization_user Resource - openai"
 subcategory: ""
 description: |-
   Manage an existing organization user. This resource is import-only; configuration alone cannot create a user. Import an existing organization user before Terraform can manage update or delete behavior.
+  Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 ---
 
 # openai_organization_user (Resource)
 
 Manage an existing organization user. This resource is import-only; configuration alone cannot create a user. Import an existing organization user before Terraform can manage update or delete behavior.
+
+Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 
 ## Example Usage
 

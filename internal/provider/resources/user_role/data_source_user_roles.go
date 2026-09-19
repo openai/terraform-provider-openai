@@ -47,7 +47,7 @@ func (d *UserRolesDataSource) Metadata(ctx context.Context, req datasource.Metad
 
 func (d *UserRolesDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "List organization-level roles for a user.",
+		MarkdownDescription: "List organization-level roles for a user.\n\nAuthentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.",
 		Attributes: map[string]schema.Attribute{
 			"user_id": schema.StringAttribute{
 				MarkdownDescription: "user id",
@@ -125,7 +125,7 @@ func (d *UserRolesDataSource) Configure(ctx context.Context, req datasource.Conf
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Missing OpenAI credential for admin API",
-			"Configure the provider with a credential for the admin API audience before using openai_user_roles.",
+			"Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience before using openai_user_roles. Credentials are not reused across API audiences.",
 		)
 		return
 	}

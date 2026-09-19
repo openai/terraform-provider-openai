@@ -4,11 +4,14 @@ page_title: "openai_project_user_role Data Source - openai"
 subcategory: ""
 description: |-
   Look up a project-level role assignment for a user. Built-in project role IDs are role-api-project-member, role-api-project-owner, and role-api-project-viewer. Use openai_project_roles to discover the roles available to a project dynamically.
+  Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 ---
 
 # openai_project_user_role (Data Source)
 
 Look up a project-level role assignment for a user. Built-in project role IDs are `role-api-project-member`, `role-api-project-owner`, and `role-api-project-viewer`. Use `openai_project_roles` to discover the roles available to a project dynamically.
+
+Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 
 ## Example Usage
 

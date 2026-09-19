@@ -35,10 +35,10 @@ func (d *WebhookEventTypesDataSource) Metadata(ctx context.Context, req datasour
 
 func (d *WebhookEventTypesDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "List webhook event types supported by the OpenAI API.",
+		MarkdownDescription: "Beta. List webhook event types visible to the authenticated project using the `api_key` provider attribute or `OPENAI_API_KEY`. Requires `api.webhooks.read`; an organization Admin API key is not accepted.\n\nAuthentication: Set the api_key provider attribute or OPENAI_API_KEY environment variable for the project API audience; with a custom base_url, set the api_key provider attribute explicitly.",
 		Attributes: map[string]schema.Attribute{
 			"event_types": schema.SetAttribute{
-				MarkdownDescription: "Supported webhook event types.",
+				MarkdownDescription: "Webhook event types visible to the authenticated project.",
 				ElementType:         types.StringType,
 				Required:            false,
 				Optional:            false,
@@ -69,7 +69,7 @@ func (d *WebhookEventTypesDataSource) Configure(ctx context.Context, req datasou
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Missing OpenAI credential for project API",
-			"Configure the provider with a credential for the project API audience before using openai_webhook_event_types.",
+			"Set the api_key provider attribute or OPENAI_API_KEY environment variable for the project API audience; with a custom base_url, set the api_key provider attribute explicitly before using openai_webhook_event_types. Credentials are not reused across API audiences.",
 		)
 		return
 	}

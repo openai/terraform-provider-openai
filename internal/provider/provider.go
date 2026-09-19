@@ -65,7 +65,7 @@ func (p *OpenAIProvider) Metadata(ctx context.Context, req provider.MetadataRequ
 
 func (p *OpenAIProvider) Schema(ctx context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Terraform provider for OpenAI API Platform administration and project webhook APIs.",
+		MarkdownDescription: "Terraform provider for OpenAI API Platform administration and beta project webhook APIs.",
 		Attributes: map[string]schema.Attribute{
 			"admin_api_key": schema.StringAttribute{
 				MarkdownDescription: "Admin API key used for organization administration requests.",
@@ -128,7 +128,7 @@ func (p *OpenAIProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		clientConfig.APIKey = data.APIKey.ValueString()
 	} else if value, ok := os.LookupEnv("OPENAI_API_KEY"); ok {
 		clientConfig.APIKey = value
-		credentialAPIKeyFromEnvironment = true
+		credentialAPIKeyFromEnvironment = strings.TrimSpace(value) != ""
 	}
 
 	if !data.BaseURL.IsNull() && !data.BaseURL.IsUnknown() {

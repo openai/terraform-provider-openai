@@ -4,11 +4,14 @@ page_title: "openai_project_spend_limit Data Source - openai"
 subcategory: ""
 description: |-
   Retrieve a project hard spend limit.
+  Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 ---
 
 # openai_project_spend_limit (Data Source)
 
 Retrieve a project hard spend limit.
+
+Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 
 ## Example Usage
 

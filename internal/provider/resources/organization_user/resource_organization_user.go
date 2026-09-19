@@ -52,7 +52,7 @@ func (r *OrganizationUserResource) Metadata(ctx context.Context, req resource.Me
 
 func (r *OrganizationUserResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manage an existing organization user. This resource is import-only; configuration alone cannot create a user. Import an existing organization user before Terraform can manage update or delete behavior.",
+		MarkdownDescription: "Manage an existing organization user. This resource is import-only; configuration alone cannot create a user. Import an existing organization user before Terraform can manage update or delete behavior.\n\nAuthentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.",
 		Attributes: map[string]schema.Attribute{
 			"user_id": schema.StringAttribute{
 				MarkdownDescription: "user id",
@@ -196,7 +196,7 @@ func (r *OrganizationUserResource) Configure(ctx context.Context, req resource.C
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Missing OpenAI credential for admin API",
-			"Configure the provider with a credential for the admin API audience before using openai_organization_user.",
+			"Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience before using openai_organization_user. Credentials are not reused across API audiences.",
 		)
 		return
 	}

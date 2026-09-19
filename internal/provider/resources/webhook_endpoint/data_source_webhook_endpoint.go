@@ -43,7 +43,7 @@ func (d *WebhookEndpointDataSource) Metadata(ctx context.Context, req datasource
 
 func (d *WebhookEndpointDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Retrieve a project webhook endpoint by ID using a project API key.",
+		MarkdownDescription: "Beta. Retrieve a webhook endpoint by ID in the authenticated project using the `api_key` provider attribute or `OPENAI_API_KEY`. Requires `api.webhooks.read`; an organization Admin API key is not accepted.\n\nAuthentication: Set the api_key provider attribute or OPENAI_API_KEY environment variable for the project API audience; with a custom base_url, set the api_key provider attribute explicitly.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "Webhook endpoint identifier.",
@@ -57,21 +57,21 @@ func (d *WebhookEndpointDataSource) Schema(ctx context.Context, req datasource.S
 				},
 			},
 			"name": schema.StringAttribute{
-				MarkdownDescription: "name",
+				MarkdownDescription: "Human-readable webhook endpoint name.",
 				Required:            false,
 				Optional:            false,
 				Computed:            true,
 				Sensitive:           false,
 			},
 			"url": schema.StringAttribute{
-				MarkdownDescription: "url",
+				MarkdownDescription: "HTTPS URL that receives webhook events.",
 				Required:            false,
 				Optional:            false,
 				Computed:            true,
 				Sensitive:           true,
 			},
 			"event_types": schema.SetAttribute{
-				MarkdownDescription: "event types",
+				MarkdownDescription: "Event types delivered to this endpoint.",
 				ElementType:         types.StringType,
 				Required:            false,
 				Optional:            false,
@@ -79,28 +79,28 @@ func (d *WebhookEndpointDataSource) Schema(ctx context.Context, req datasource.S
 				Sensitive:           false,
 			},
 			"object": schema.StringAttribute{
-				MarkdownDescription: "object",
+				MarkdownDescription: "API object type.",
 				Required:            false,
 				Optional:            false,
 				Computed:            true,
 				Sensitive:           false,
 			},
 			"created_at": schema.Int64Attribute{
-				MarkdownDescription: "created at",
+				MarkdownDescription: "Unix timestamp when the endpoint was created.",
 				Required:            false,
 				Optional:            false,
 				Computed:            true,
 				Sensitive:           false,
 			},
 			"updated_at": schema.Int64Attribute{
-				MarkdownDescription: "updated at",
+				MarkdownDescription: "Unix timestamp when the endpoint was last updated.",
 				Required:            false,
 				Optional:            false,
 				Computed:            true,
 				Sensitive:           false,
 			},
 			"signing_secret_hint": schema.StringAttribute{
-				MarkdownDescription: "signing secret hint",
+				MarkdownDescription: "Redacted hint for the endpoint signing secret.",
 				Required:            false,
 				Optional:            false,
 				Computed:            true,
@@ -130,7 +130,7 @@ func (d *WebhookEndpointDataSource) Configure(ctx context.Context, req datasourc
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Missing OpenAI credential for project API",
-			"Configure the provider with a credential for the project API audience before using openai_webhook_endpoint.",
+			"Set the api_key provider attribute or OPENAI_API_KEY environment variable for the project API audience; with a custom base_url, set the api_key provider attribute explicitly before using openai_webhook_endpoint. Credentials are not reused across API audiences.",
 		)
 		return
 	}

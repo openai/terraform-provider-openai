@@ -4,11 +4,14 @@ page_title: "openai_project_group Resource - openai"
 subcategory: ""
 description: |-
   Manage a group assignment to a project.
+  Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 ---
 
 # openai_project_group (Resource)
 
 Manage a group assignment to a project.
+
+Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 
 ## Example Usage
 

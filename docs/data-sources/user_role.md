@@ -4,11 +4,14 @@ page_title: "openai_user_role Data Source - openai"
 subcategory: ""
 description: |-
   Look up an organization-level role assignment for a user.
+  Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 ---
 
 # openai_user_role (Data Source)
 
 Look up an organization-level role assignment for a user.
+
+Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 
 ## Example Usage
 

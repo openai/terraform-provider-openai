@@ -3,12 +3,15 @@
 page_title: "openai_webhook_event_types Data Source - openai"
 subcategory: ""
 description: |-
-  List webhook event types supported by the OpenAI API.
+  Beta. List webhook event types visible to the authenticated project using the api_key provider attribute or OPENAI_API_KEY. Requires api.webhooks.read; an organization Admin API key is not accepted.
+  Authentication: Set the api_key provider attribute or OPENAI_API_KEY environment variable for the project API audience; with a custom base_url, set the api_key provider attribute explicitly.
 ---
 
 # openai_webhook_event_types (Data Source)
 
-List webhook event types supported by the OpenAI API.
+Beta. List webhook event types visible to the authenticated project using the `api_key` provider attribute or `OPENAI_API_KEY`. Requires `api.webhooks.read`; an organization Admin API key is not accepted.
+
+Authentication: Set the api_key provider attribute or OPENAI_API_KEY environment variable for the project API audience; with a custom base_url, set the api_key provider attribute explicitly.
 
 ## Example Usage
 
@@ -22,5 +25,5 @@ data "openai_webhook_event_types" "example" {
 
 ### Read-Only
 
-- `event_types` (Set of String) Supported webhook event types.
+- `event_types` (Set of String) Webhook event types visible to the authenticated project.
 - `id` (String) Synthetic data source identifier.

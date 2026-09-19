@@ -4,11 +4,14 @@ page_title: "openai_mcp_tunnel Resource - openai"
 subcategory: ""
 description: |-
   Manage an MCP tunnel registration. Requires access to the Tunnels API and an organization admin API key. Manages the name and description; associated organizations, workspaces, and tenants are read-only. Creation associates the authenticated organization or workspace. Deploy and authenticate the tunnel client separately; this resource does not issue credentials.
+  Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 ---
 
 # openai_mcp_tunnel (Resource)
 
 Manage an MCP tunnel registration. Requires access to the Tunnels API and an organization admin API key. Manages the name and description; associated organizations, workspaces, and tenants are read-only. Creation associates the authenticated organization or workspace. Deploy and authenticate the tunnel client separately; this resource does not issue credentials.
+
+Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 
 ## Example Usage
 

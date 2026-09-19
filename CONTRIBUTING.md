@@ -167,12 +167,14 @@ Check Terraform example formatting when relevant:
 terraform fmt -check -recursive examples
 ```
 
-Acceptance tests are explicitly opt-in and require `TF_ACC=1`,
-`OPENAI_ADMIN_KEY`, and applicable `OPENAI_TF_ACC_*` fixture variables. They can
-create, modify, or delete real organization resources and may affect access,
-retention, or spending. Run `make testacc` or its narrower targets only against
-an authorized isolated organization with approved credentials; never enable
-acceptance tests automatically in pull-request workflows.
+Acceptance tests are explicitly opt-in and require `TF_ACC=1`, the
+audience-specific `OPENAI_ADMIN_KEY` and/or `OPENAI_API_KEY`, and applicable
+`OPENAI_TF_ACC_*` fixture variables. They can create, modify, or delete real
+organization resources and project webhook endpoints, and may affect access,
+retention, spending, or outbound event delivery. Run `make testacc` or its
+narrower targets only against an authorized isolated organization or project
+with approved credentials; never enable acceptance tests automatically in
+pull-request workflows.
 
 ## Reporting vulnerabilities
 

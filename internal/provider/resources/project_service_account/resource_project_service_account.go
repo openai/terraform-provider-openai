@@ -43,7 +43,7 @@ func (r *ProjectServiceAccountResource) Metadata(ctx context.Context, req resour
 
 func (r *ProjectServiceAccountResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manage a project service account. This resource sets `create_service_account_only=true` and creates only the service account; it does not assign roles or create an API key. Manage role assignments using separate Terraform resources, and create and manage API keys outside Terraform using the public API.",
+		MarkdownDescription: "Manage a project service account. This resource sets `create_service_account_only=true` and creates only the service account; it does not assign roles or create an API key. Manage role assignments using separate Terraform resources, and create and manage API keys outside Terraform using the public API.\n\nAuthentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.",
 		Attributes: map[string]schema.Attribute{
 			"project_id": schema.StringAttribute{
 				MarkdownDescription: "project id",
@@ -119,7 +119,7 @@ func (r *ProjectServiceAccountResource) Configure(ctx context.Context, req resou
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Missing OpenAI credential for admin API",
-			"Configure the provider with a credential for the admin API audience before using openai_project_service_account.",
+			"Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience before using openai_project_service_account. Credentials are not reused across API audiences.",
 		)
 		return
 	}

@@ -4,11 +4,14 @@ page_title: "openai_project_rate_limit Resource - openai"
 subcategory: ""
 description: |-
   Manage an existing project rate limit.
+  Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 ---
 
 # openai_project_rate_limit (Resource)
 
 Manage an existing project rate limit.
+
+Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 
 ## Example Usage
 

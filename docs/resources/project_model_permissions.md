@@ -4,11 +4,14 @@ page_title: "openai_project_model_permissions Resource - openai"
 subcategory: ""
 description: |-
   Manage project model permissions.
+  Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 ---
 
 # openai_project_model_permissions (Resource)
 
 Manage project model permissions.
+
+Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 
 ## Example Usage
 

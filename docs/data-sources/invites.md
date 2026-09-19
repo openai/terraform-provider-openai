@@ -4,11 +4,14 @@ page_title: "openai_invites Data Source - openai"
 subcategory: ""
 description: |-
   List organization invites.
+  Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 ---
 
 # openai_invites (Data Source)
 
 List organization invites.
+
+Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 
 ## Example Usage
 

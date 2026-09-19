@@ -52,7 +52,7 @@ func (d *OrganizationUsersDataSource) Metadata(ctx context.Context, req datasour
 
 func (d *OrganizationUsersDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "List organization users.",
+		MarkdownDescription: "List organization users.\n\nAuthentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "Synthetic data source identifier.",
@@ -146,7 +146,7 @@ func (d *OrganizationUsersDataSource) Configure(ctx context.Context, req datasou
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Missing OpenAI credential for admin API",
-			"Configure the provider with a credential for the admin API audience before using openai_organization_users.",
+			"Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience before using openai_organization_users. Credentials are not reused across API audiences.",
 		)
 		return
 	}

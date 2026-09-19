@@ -4,11 +4,14 @@ page_title: "openai_project_user Resource - openai"
 subcategory: ""
 description: |-
   Manage a user's project membership.
+  Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 ---
 
 # openai_project_user (Resource)
 
 Manage a user's project membership.
+
+Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 
 ## Example Usage
 

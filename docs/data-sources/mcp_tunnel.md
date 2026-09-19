@@ -4,11 +4,14 @@ page_title: "openai_mcp_tunnel Data Source - openai"
 subcategory: ""
 description: |-
   Retrieve an MCP tunnel registration by ID using an organization admin API key.
+  Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 ---
 
 # openai_mcp_tunnel (Data Source)
 
 Retrieve an MCP tunnel registration by ID using an organization admin API key.
+
+Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 
 ## Example Usage
 

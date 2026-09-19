@@ -3,12 +3,15 @@
 page_title: "openai_webhook_endpoint Resource - openai"
 subcategory: ""
 description: |-
-  Manage a webhook endpoint in the project associated with the configured project API key. The signing secret is returned only when the endpoint is created, is stored in Terraform state as a sensitive value, is unavailable after import, and can become stale if the secret is rotated outside Terraform.
+  Beta. Manage a webhook endpoint in the authenticated project using the api_key provider attribute or OPENAI_API_KEY. Reads require api.webhooks.read; create, update, and delete require api.webhooks.write and a project-owner credential. Organization Admin API keys are not accepted for this project-scoped API. The signing secret is returned only when the endpoint is created, is stored in Terraform state as a sensitive value, is unavailable after import, and can become stale if the secret is rotated outside Terraform. Testing an endpoint and rotating its signing secret are imperative API operations and are not managed by this Terraform resource.
+  Authentication: Set the api_key provider attribute or OPENAI_API_KEY environment variable for the project API audience; with a custom base_url, set the api_key provider attribute explicitly.
 ---
 
 # openai_webhook_endpoint (Resource)
 
-Manage a webhook endpoint in the project associated with the configured project API key. The signing secret is returned only when the endpoint is created, is stored in Terraform state as a sensitive value, is unavailable after import, and can become stale if the secret is rotated outside Terraform.
+Beta. Manage a webhook endpoint in the authenticated project using the `api_key` provider attribute or `OPENAI_API_KEY`. Reads require `api.webhooks.read`; create, update, and delete require `api.webhooks.write` and a project-owner credential. Organization Admin API keys are not accepted for this project-scoped API. The signing secret is returned only when the endpoint is created, is stored in Terraform state as a sensitive value, is unavailable after import, and can become stale if the secret is rotated outside Terraform. Testing an endpoint and rotating its signing secret are imperative API operations and are not managed by this Terraform resource.
+
+Authentication: Set the api_key provider attribute or OPENAI_API_KEY environment variable for the project API audience; with a custom base_url, set the api_key provider attribute explicitly.
 
 ## Example Usage
 

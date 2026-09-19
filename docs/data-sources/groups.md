@@ -4,11 +4,14 @@ page_title: "openai_groups Data Source - openai"
 subcategory: ""
 description: |-
   List organization groups.
+  Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 ---
 
 # openai_groups (Data Source)
 
 List organization groups.
+
+Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 
 ## Example Usage
 

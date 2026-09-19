@@ -6,8 +6,9 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and
 ## Generated code and repository ownership
 
 - The provider manages OpenAI Administration API resources with privileged
-  organization credentials. Treat authentication, authorization, Terraform
-  state, and published provider artifacts as security-sensitive boundaries.
+  organization credentials and beta project webhook resources with project
+  credentials. Treat authentication, authorization, Terraform state, and
+  published provider artifacts as security-sensitive boundaries.
 - Check `.terraform-generator-manifest.json` before editing provider sources,
   generated tests, Terraform examples, or `docs/`. Files listed in the manifest
   and files marked `Code generated ... DO NOT EDIT` are generator-owned; change
@@ -22,14 +23,17 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and
 - Never commit, print, or upload real admin or API keys, bearer tokens, GitHub
   App private keys, GPG keys, signing passphrases, `.env` files, customer data,
   Terraform state, saved plans, or sensitive `.tfvars` files. Read the provider's
-  organization-admin credential from `OPENAI_ADMIN_KEY`; do not substitute
-  `OPENAI_API_KEY` or place a live key in Terraform configuration or examples.
+  organization-admin credential from `OPENAI_ADMIN_KEY` and its project-webhook
+  credential from `OPENAI_API_KEY`; the audiences are not substitutes for one
+  another. Do not place a live key in Terraform configuration or examples.
 - Use clearly fake credentials, synthetic organization/project/user data,
   `t.Setenv`, and `httptest` or local mocks in ordinary tests and fixtures.
-  Acceptance tests require an explicit `TF_ACC=1`, `OPENAI_ADMIN_KEY`, and
-  applicable `OPENAI_TF_ACC_*` values; they can mutate real organizations, users,
-  roles, projects, certificates, retention settings, and spend controls. Never
-  enable them automatically or run them without an authorized isolated account.
+  Acceptance tests require an explicit `TF_ACC=1`, the audience-specific
+  `OPENAI_ADMIN_KEY` and/or `OPENAI_API_KEY`, and applicable
+  `OPENAI_TF_ACC_*` values. They can mutate real organizations, users, roles,
+  projects, certificates, retention settings, spend controls, and webhook
+  endpoints. Never enable them automatically or run them without an authorized
+  isolated account or project.
 - Redact `Authorization` and other credential-bearing headers, cookies, signed
   URLs, private key material, customer identifiers, email addresses, and
   sensitive request or response bodies from diagnostics, fixtures, Terraform

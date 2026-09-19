@@ -4,11 +4,14 @@ page_title: "openai_project_roles Data Source - openai"
 subcategory: ""
 description: |-
   List the built-in and custom roles available to a project. Built-in role IDs are role-api-project-member, role-api-project-owner, and role-api-project-viewer. Filter the returned roles by predefined_role and name to discover a built-in role ID dynamically.
+  Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 ---
 
 # openai_project_roles (Data Source)
 
 List the built-in and custom roles available to a project. Built-in role IDs are `role-api-project-member`, `role-api-project-owner`, and `role-api-project-viewer`. Filter the returned roles by `predefined_role` and `name` to discover a built-in role ID dynamically.
+
+Authentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.
 
 ## Example Usage
 

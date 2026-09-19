@@ -40,7 +40,7 @@ func (d *OrganizationSpendLimitDataSource) Metadata(ctx context.Context, req dat
 
 func (d *OrganizationSpendLimitDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Retrieve the organization hard spend limit.",
+		MarkdownDescription: "Retrieve the organization hard spend limit.\n\nAuthentication: Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience.",
 		Attributes: map[string]schema.Attribute{
 			"object": schema.StringAttribute{
 				MarkdownDescription: "object",
@@ -108,7 +108,7 @@ func (d *OrganizationSpendLimitDataSource) Configure(ctx context.Context, req da
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Missing OpenAI credential for admin API",
-			"Configure the provider with a credential for the admin API audience before using openai_organization_spend_limit.",
+			"Set the admin_api_key provider attribute or OPENAI_ADMIN_KEY environment variable for the admin API audience before using openai_organization_spend_limit. Credentials are not reused across API audiences.",
 		)
 		return
 	}

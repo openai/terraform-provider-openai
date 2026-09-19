@@ -47,7 +47,7 @@ func (r *WebhookEndpointResource) Metadata(ctx context.Context, req resource.Met
 
 func (r *WebhookEndpointResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manage a webhook endpoint in the project associated with the configured project API key. The signing secret is returned only when the endpoint is created, is stored in Terraform state as a sensitive value, is unavailable after import, and can become stale if the secret is rotated outside Terraform.",
+		MarkdownDescription: "Beta. Manage a webhook endpoint in the authenticated project using the `api_key` provider attribute or `OPENAI_API_KEY`. Reads require `api.webhooks.read`; create, update, and delete require `api.webhooks.write` and a project-owner credential. Organization Admin API keys are not accepted for this project-scoped API. The signing secret is returned only when the endpoint is created, is stored in Terraform state as a sensitive value, is unavailable after import, and can become stale if the secret is rotated outside Terraform. Testing an endpoint and rotating its signing secret are imperative API operations and are not managed by this Terraform resource.\n\nAuthentication: Set the api_key provider attribute or OPENAI_API_KEY environment variable for the project API audience; with a custom base_url, set the api_key provider attribute explicitly.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "Webhook endpoint identifier.",
@@ -155,7 +155,7 @@ func (r *WebhookEndpointResource) Configure(ctx context.Context, req resource.Co
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Missing OpenAI credential for project API",
-			"Configure the provider with a credential for the project API audience before using openai_webhook_endpoint.",
+			"Set the api_key provider attribute or OPENAI_API_KEY environment variable for the project API audience; with a custom base_url, set the api_key provider attribute explicitly before using openai_webhook_endpoint. Credentials are not reused across API audiences.",
 		)
 		return
 	}
