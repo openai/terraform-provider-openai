@@ -2604,6 +2604,14 @@ func TestApplyStringResponseFieldRequiresIdentityValue(t *testing.T) {
 	}
 }
 
+func TestApplyStringResponseFieldRejectsNullRequiredValue(t *testing.T) {
+	var value types.String
+	err := ApplyStringResponseField(map[string]any{"id": nil}, []string{"id"}, &value, true)
+	if err == nil || !strings.Contains(err.Error(), "missing required response field") {
+		t.Fatalf("expected null required response field error, got %v", err)
+	}
+}
+
 func TestApplyStringResponseFieldRejectsMalformedValue(t *testing.T) {
 	var value types.String
 	err := ApplyStringResponseField(map[string]any{"id": []any{"not-a-string"}}, []string{"id"}, &value, true)

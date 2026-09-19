@@ -8,9 +8,11 @@ disclosure and reportability policy.
 ## 1. Overview
 
 The provider is a Terraform protocol plugin that manages privileged OpenAI
-Administration API resources. Terraform loads the provider, supplies
-configuration, plan, state, and import values, and the provider translates
-those values into requests to the configured Administration API origin. The
+Administration API resources and project-scoped webhook endpoints. Terraform
+loads the provider, supplies configuration, plan, state, and import values, and
+the provider translates those values into requests to the configured API
+origin. Administration resources use only the configured Admin API credential;
+webhook resources use only the configured project API credential. The
 provider bounds GET and paginated API responses, parses API responses,
 validates modeled fields, and some data sources intentionally persist the
 bounded raw GET response as `response_json` state. Mutation responses use the
@@ -26,9 +28,9 @@ registry ([main.go](../../main.go#L16-L24),
 
 | Component | Responsibility | Evidence |
 | --- | --- | --- |
-| Provider configuration | Selects the Admin API credential, API origin, organization, and project; creates the shared client for resources and data sources. | [internal/provider/provider.go](../../internal/provider/provider.go#L63-L151) |
+| Provider configuration | Selects audience-specific Admin and project API credentials, API origin, organization, and project; creates isolated clients for configured credential audiences without cross-audience fallback. | [internal/provider/provider.go](../../internal/provider/provider.go#L63-L177) |
 | API client | Expands fixed route templates, escapes path parameters, issues lifecycle-bounded requests, applies byte budgets to GET/paginated responses, parses responses, paginates, caches reads, and records redacted lifecycle telemetry. | [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L293-L325), [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L337-L456), [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L811-L861), [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L870-L929), [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L946-L1144) |
-| Generated resources and data sources | Map Terraform schemas and CRUD/read operations to organization and project Administration API endpoints. | [internal/provider/provider.go](../../internal/provider/provider.go#L154-L225) |
+| Generated resources and data sources | Map Terraform schemas and CRUD/read operations to organization and project Administration API endpoints or project-scoped webhook endpoints, selecting the declared credential audience during configuration. | [internal/provider/provider.go](../../internal/provider/provider.go#L180-L261), [internal/provider/resources/webhook_endpoint/resource_webhook_endpoint.go](../../internal/provider/resources/webhook_endpoint/resource_webhook_endpoint.go#L140-L166) |
 | Service-account resource | Creates only a service account and deliberately does not create an API key or assign a role. | [internal/provider/resources/project_service_account/resource_project_service_account.go](../../internal/provider/resources/project_service_account/resource_project_service_account.go#L44-L46), [internal/provider/resources/project_service_account/resource_project_service_account.go](../../internal/provider/resources/project_service_account/resource_project_service_account.go#L121-L159) |
 | Ordinary CI | Builds, tests, lints, formats examples, checks generated docs, and verifies release SBOMs with read-only repository permission. | [.github/workflows/ci.yml](../../.github/workflows/ci.yml#L13-L15), [.github/workflows/ci.yml](../../.github/workflows/ci.yml#L43-L162) |
 | Release workflows | Create release PRs, automatically tag their merged commits with draft releases, then publish verified signed artifacts through scoped environments. | [.github/workflows/release-please.yml](../../.github/workflows/release-please.yml#L8-L32), [.github/workflows/release.yml](../../.github/workflows/release.yml#L12-L109) |
@@ -37,8 +39,8 @@ registry ([main.go](../../main.go#L16-L24),
 
 | Deployment or workflow | Resource or capability | Configuration and precedence | Safe effective value or location | Readers, writers, or recipients | Enforcing control | Evidence or unknowns |
 | --- | --- | --- | --- | --- | --- | --- |
-| Normal provider execution | Administration credential and request destination | `admin_api_key` overrides `OPENAI_ADMIN_KEY`; `base_url` overrides the default origin. | Credential value is secret; default destination is `https://api.openai.com/v1`. | Provider client and configured API origin. | Credential is schema-sensitive; destination validation rejects embedded credentials and non-loopback plaintext HTTP; redirects stay on the configured origin. A deployment must not let a lower-trust config author choose `base_url` while a separate trusted runtime injects the key. | [internal/provider/provider.go](../../internal/provider/provider.go#L67-L77), [internal/provider/provider.go](../../internal/provider/provider.go#L102-L149), [internal/provider/provider_security.go](../../internal/provider/provider_security.go#L19-L52), [internal/provider/provider_security.go](../../internal/provider/provider_security.go#L84-L117) |
-| Terraform state and plans | Organization/project resource state, including certificate-related fields and raw `response_json` on data sources | Terraform configuration, remote API responses, and Terraform backend policy. | Caller-managed Terraform state and plan storage; no repository-owned backend is configured here. Raw response JSON can contain API-returned fields beyond modeled attributes and must be treated as potentially confidential. | Terraform operator and backend-authorized readers. | `Sensitive: true` limits normal display for sensitive schema fields but does not remove values from state or plans; raw `response_json` is intentionally persisted by data sources. | [internal/provider/provider.go](../../internal/provider/provider.go#L67-L72), [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L1450-L1456), [internal/provider/resources/certificate/data_source_certificate.go](../../internal/provider/resources/certificate/data_source_certificate.go#L92-L98), [internal/provider/resources/certificate/data_source_certificate.go](../../internal/provider/resources/certificate/data_source_certificate.go#L155-L156), [CONTRIBUTING.md](../../CONTRIBUTING.md#L85-L93); backend controls are external. |
+| Normal provider execution | Audience-specific credentials and request destination | `admin_api_key` overrides `OPENAI_ADMIN_KEY`; `api_key` overrides `OPENAI_API_KEY`; `base_url` overrides the default origin. | Credential values are secret; default destination is `https://api.openai.com/v1`. | The matching audience client and configured API origin. | Both credentials are schema-sensitive; resources explicitly select one audience and never fall back to the other; destination validation rejects embedded credentials and non-loopback plaintext HTTP; redirects stay on the configured origin. A deployment must not let a lower-trust config author choose `base_url` while a separate trusted runtime injects either key. | [internal/provider/provider.go](../../internal/provider/provider.go#L67-L84), [internal/provider/provider.go](../../internal/provider/provider.go#L113-L177), [internal/provider/provider_security.go](../../internal/provider/provider_security.go#L19-L52), [internal/provider/provider_security.go](../../internal/provider/provider_security.go#L84-L117) |
+| Terraform state and plans | Organization/project resource state, webhook signing secrets, certificate-related fields, and raw `response_json` on data sources | Terraform configuration, remote API responses, and Terraform backend policy. | Caller-managed Terraform state and plan storage; no repository-owned backend is configured here. Webhook signing secrets are returned only on creation and remain in state; raw response JSON can contain API-returned fields beyond modeled attributes. Both must be treated as confidential. | Terraform operator and backend-authorized readers. | `Sensitive: true` limits normal display for sensitive schema fields but does not remove values from state or plans. Webhook reads and updates preserve the create-time secret, while import cannot recover it; raw `response_json` is intentionally persisted by data sources. | [internal/provider/resources/webhook_endpoint/resource_webhook_endpoint.go](../../internal/provider/resources/webhook_endpoint/resource_webhook_endpoint.go#L116-L126), [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L1450-L1456), [internal/provider/resources/certificate/data_source_certificate.go](../../internal/provider/resources/certificate/data_source_certificate.go#L92-L98), [CONTRIBUTING.md](../../CONTRIBUTING.md#L85-L93); backend controls are external. |
 | Ordinary pull-request CI | Execution of checked-in build, test, generation, and verification code | Workflow checked out at the proposed revision. | Ephemeral GitHub Actions runner. | PR code can execute in that runner; repository permission is read-only. | Workflow-level `contents: read`; no protected release credentials are declared in this workflow. | [.github/workflows/ci.yml](../../.github/workflows/ci.yml#L13-L15), [.github/workflows/ci.yml](../../.github/workflows/ci.yml#L43-L162) |
 | Release-please on main | GitHub App token for release PRs, tags, and draft releases | Push to `main`, then protected `release` environment. | Token derived from `OPENAI_SDKS_APP_PRIVATE_KEY`; literal secret is never repository data. | release-please action receives contents and pull-request write authority. | Empty workflow default permissions; token created only in the `release` environment with explicit scopes. | [.github/workflows/release-please.yml](../../.github/workflows/release-please.yml#L3-L32) |
 | Tag-triggered publication | GPG signing key, passphrase, OIDC attestations, release publication | Tag matching `v*`, successful SBOM job, then protected `publish` environment. | Protected environment secrets and runner-local verified artifacts. | Publish job, GoReleaser, release verifier, GitHub attestations. | Separate pre-publish SBOM job; publish job has scoped permissions; tools, dependencies, SBOMs, checksums, and attestations are verified. | [.github/workflows/release.yml](../../.github/workflows/release.yml#L3-L33), [.github/workflows/release.yml](../../.github/workflows/release.yml#L44-L109), [.github/actions/setup-release-tools/install.sh](../../.github/actions/setup-release-tools/install.sh#L28-L57), [.github/actions/verify-release-dependencies/action.yml](../../.github/actions/verify-release-dependencies/action.yml#L7-L22) |
@@ -47,19 +49,29 @@ registry ([main.go](../../main.go#L16-L24),
 
 ### Protected assets and objectives
 
-- The Admin API credential must reach only the operator-selected API origin and
-  must not appear in diagnostics, logs, fixtures, source, or ordinary display.
-  The provider marks it sensitive and creates a same-origin redirect policy
-  ([internal/provider/provider.go](../../internal/provider/provider.go#L67-L72),
-  [internal/provider/provider.go](../../internal/provider/provider.go#L125-L149),
+- The Admin and project API credentials must reach only the operator-selected
+  API origin and their declared resource audiences, with no cross-audience
+  fallback. They must not appear in diagnostics, logs, fixtures, source, or
+  ordinary display. The provider marks both sensitive and creates a same-origin
+  redirect policy
+  ([internal/provider/provider.go](../../internal/provider/provider.go#L67-L84),
+  [internal/provider/provider.go](../../internal/provider/provider.go#L113-L177),
   [internal/provider/provider_security.go](../../internal/provider/provider_security.go#L98-L117)).
 - Organization and project resources—users, groups, roles, service accounts,
   certificates, retention settings, spend controls, permissions, and rate
   limits—must be mutated only through the caller's Admin API authority and the
   API's authorization checks ([internal/provider/provider.go](../../internal/provider/provider.go#L154-L225)).
+- Webhook endpoints must be read and mutated only through project API authority
+  with the applicable `api.webhooks.read` or `api.webhooks.write` scope. The
+  provider must not substitute an Admin API credential when the project
+  credential is absent
+  ([internal/provider/resources/webhook_endpoint/resource_webhook_endpoint.go](../../internal/provider/resources/webhook_endpoint/resource_webhook_endpoint.go#L140-L166)).
 - Terraform state and plans can contain confidential operational data; callers
   must protect their backend even where the schema suppresses normal display
   ([CONTRIBUTING.md](../../CONTRIBUTING.md#L85-L89)).
+- A webhook signing secret must be captured only from the create response,
+  marked sensitive, never sent in mutation bodies, and preserved rather than
+  overwritten by later API responses. Import cannot recover the one-time value.
 - Service-account creation must preserve
   `create_service_account_only=true`: no implicit API key, role grant, or
   credential persistence ([internal/provider/resources/project_service_account/resource_project_service_account.go](../../internal/provider/resources/project_service_account/resource_project_service_account.go#L44-L46),
@@ -71,15 +83,15 @@ registry ([main.go](../../main.go#L16-L24),
 
 ### Actors and starting capabilities
 
-- A Terraform operator holding an Admin API key can intentionally configure the
-  provider and request privileged Administration API operations. That authority
-  is not a provider bypass.
+- A Terraform operator holding an Admin API key or project API key can
+  intentionally configure the provider and request operations authorized for
+  that credential audience. That authority is not a provider bypass.
 - A Terraform configuration, state, or import author can supply attribute
   values, identifiers, and a configured HTTPS endpoint, but cannot change fixed
   checked-in route templates or grant themselves API authorization. If that
   author is less trusted than the runtime that independently injects
-  `OPENAI_ADMIN_KEY`, forwarding the key to their selected endpoint is a real
-  credential boundary.
+  `OPENAI_ADMIN_KEY` or `OPENAI_API_KEY`, forwarding either key to their
+  selected endpoint is a real credential boundary.
 - The configured API/network peer can supply responses, redirects, status codes,
   and retry metadata, but should not redirect the credential across origins or
   force unbounded parsing.
@@ -113,14 +125,17 @@ reach credentials or authority reserved for protected CI/release workflows.
 ### Boundary crossings and invariants
 
 1. **Terraform host to provider.** Configuration, environment variables, plan,
-   state, and import IDs enter privileged API operations. The Admin key is
-   sensitive, configuration precedence is explicit, and missing credentials
-   fail provider configuration ([internal/provider/provider.go](../../internal/provider/provider.go#L95-L149)).
+   state, and import IDs enter privileged API operations. Both credential
+   fields are sensitive, configuration precedence is explicit, and each
+   resource fails configuration when its own audience credential is missing;
+   one audience never substitutes for another
+   ([internal/provider/provider.go](../../internal/provider/provider.go#L106-L177)).
 2. **Provider to API origin.** A custom endpoint is intentional only when the
    same trusted authority selects the destination and supplies or authorizes
-   the Admin key. If a lower-trust Terraform config author selects `base_url`
-   while a separate runtime injects `OPENAI_ADMIN_KEY`, credential forwarding
-   is a real boundary. Every endpoint must be an absolute HTTP(S) URL without
+   the applicable credential. If a lower-trust Terraform config author selects
+   `base_url` while a separate runtime injects `OPENAI_ADMIN_KEY` or
+   `OPENAI_API_KEY`, credential forwarding is a real boundary. Every endpoint
+   must be an absolute HTTP(S) URL without
    embedded credentials; plaintext is loopback-only, and redirects cannot cross
    the configured origin or exceed ten hops
    ([internal/provider/provider_security.go](../../internal/provider/provider_security.go#L19-L52),
@@ -145,10 +160,14 @@ reach credentials or authority reserved for protected CI/release workflows.
    [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L1450-L1456),
    [internal/provider/resources/certificate/data_source_certificate.go](../../internal/provider/resources/certificate/data_source_certificate.go#L92-L98),
    [internal/provider/resources/certificate/data_source_certificate.go](../../internal/provider/resources/certificate/data_source_certificate.go#L155-L156)).
+   The webhook signing secret is a special one-time create response: it is
+   stored as sensitive state, preserved when absent from reads and updates, and
+   remains unavailable after import.
 5. **Acceptance tests to real organizations.** Acceptance tests are a separate,
    mutation-capable workflow and must remain explicitly opted in with
-   `TF_ACC=1`, an Admin key, and applicable fixture values; ordinary unit and
-   CI runs must not silently become live administration
+   `TF_ACC=1`, the applicable audience credential, and fixture values; ordinary
+   unit and CI runs must not silently become live administration or webhook
+   mutation
    ([CONTRIBUTING.md](../../CONTRIBUTING.md#L168-L173)).
 6. **PR CI to protected release authority.** Proposed code running in ordinary
    CI is expected under read-only repository permission. It becomes a finding
@@ -190,12 +209,12 @@ These are review hypotheses and calibration examples, not confirmed findings.
 
 | Priority | Scenario and capability gain | Prerequisites | Impact | Existing controls | Mitigation | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
-| High | A lower-trust redirect, endpoint confusion, or Terraform configuration sends an independently injected Admin credential to an unintended origin. | Attacker influences redirect metadata or endpoint parsing, or controls `base_url` while a separate trusted runtime supplies `OPENAI_ADMIN_KEY`. | Admin credential disclosure and organization-level API authority. | URL validation rejects userinfo/non-loopback HTTP; redirects stay on the canonical configured origin and are capped. These controls do not decide whether the config author is trusted to choose the credential audience. | Preserve origin canonicalization, redirect checks, redacted errors, and deployment-level alignment between endpoint-selection and credential authority. | [internal/provider/provider.go](../../internal/provider/provider.go#L102-L149), [internal/provider/provider_security.go](../../internal/provider/provider_security.go#L19-L52), [internal/provider/provider_security.go](../../internal/provider/provider_security.go#L77-L117), [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L530-L549) |
+| High | A lower-trust redirect, endpoint confusion, or Terraform configuration sends an independently injected Admin or project credential to an unintended origin. | Attacker influences redirect metadata or endpoint parsing, or controls `base_url` while a separate trusted runtime supplies `OPENAI_ADMIN_KEY` or `OPENAI_API_KEY`. | Credential disclosure and the associated organization- or project-level API authority. | URL validation rejects userinfo/non-loopback HTTP; redirects stay on the canonical configured origin and are capped. Resources select an explicit credential audience without fallback. These controls do not decide whether the config author is trusted to choose the destination. | Preserve audience isolation, origin canonicalization, redirect checks, redacted errors, and deployment-level alignment between endpoint-selection and credential authority. | [internal/provider/provider.go](../../internal/provider/provider.go#L113-L177), [internal/provider/provider_security.go](../../internal/provider/provider_security.go#L19-L52), [internal/provider/provider_security.go](../../internal/provider/provider_security.go#L77-L117), [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L530-L549) |
 | High | Proposed PR code reaches protected release credentials or publication authority from ordinary CI. | Workflow change, token scope change, or environment exposure bridges normal PR execution to protected authority. | Signing-key theft or unauthorized artifact publication. | Ordinary CI is read-only; release and publish are separate protected workflows/environments. | Preserve least privilege, environment separation, pinned actions, and review changes to workflows as security-sensitive. | [.github/workflows/ci.yml](../../.github/workflows/ci.yml#L13-L15), [.github/workflows/release-please.yml](../../.github/workflows/release-please.yml#L8-L26), [.github/workflows/release.yml](../../.github/workflows/release.yml#L26-L33) |
 | High | Unverified runner state, downloaded tools, dependencies, or SBOM output contaminates a signed release. | Attacker controls a mutable release input after review but before signing. | Malicious or misdescribed signed provider artifacts. | Pinned tool digests, clean module/build caches, `go mod verify`, sanitized Go/Git environment, SBOM verification, signed checksums, and attestations. | Keep verification before credential import/signing and fail closed on drift. | [.github/actions/setup-release-tools/install.sh](../../.github/actions/setup-release-tools/install.sh#L28-L57), [.github/actions/verify-release-dependencies/action.yml](../../.github/actions/verify-release-dependencies/action.yml#L7-L22), [.github/workflows/release.yml](../../.github/workflows/release.yml#L44-L109) |
 | Medium | Crafted config, state, or import identifiers alter an API route or address another resource. | Lower-trust identifier reaches path construction. | Wrong-resource read or mutation under the operator's credential. | Empty/dot segments are rejected and path components are escaped. | Preserve validators and import parsing for every identifier-bearing resource. | [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L410-L435), [internal/provider/resources/project_service_account/resource_project_service_account.go](../../internal/provider/resources/project_service_account/resource_project_service_account.go#L247-L263) |
 | Medium | Malformed, oversized, or adversarially paginated API data causes unsafe state changes or resource exhaustion. | Configured API/network peer returns hostile responses. | Bounded denial of service or invalid state; API-side semantic authorization remains external. | GET/paginated responses have byte and page budgets, cursor checks, and typed extraction; all methods have overall timeout and bounded retries, while mutation responses do not currently share the GET byte budgets. | Preserve GET/pagination bounds, typed decoding, and request-lifecycle controls; assess mutation-response size handling when changing that path. | [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L337-L402), [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L717-L747), [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L870-L929), [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L946-L1000), [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L1071-L1144) |
-| Medium | A credential or sensitive API value leaks through state, raw `response_json`, diagnostics, logs, fixtures, or artifacts. | Sensitive value reaches an observable sink available to a less-privileged actor. | Credential disclosure or confidential organization data exposure. | Sensitive schema marking, redaction guidance, and lifecycle telemetry that records request metadata rather than bodies; data sources intentionally persist bounded raw response JSON. | Keep diagnostics and telemetry body/header-free; treat state and raw response JSON as potentially confidential; use synthetic test data. | [internal/provider/provider.go](../../internal/provider/provider.go#L67-L72), [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L1450-L1456), [internal/provider/resources/certificate/data_source_certificate.go](../../internal/provider/resources/certificate/data_source_certificate.go#L92-L98), [internal/provider/resources/certificate/data_source_certificate.go](../../internal/provider/resources/certificate/data_source_certificate.go#L155-L156), [CONTRIBUTING.md](../../CONTRIBUTING.md#L76-L93), [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L486-L509) |
+| Medium | A credential, webhook signing secret, or other sensitive API value leaks through state, raw `response_json`, diagnostics, logs, fixtures, or artifacts. | Sensitive value reaches an observable sink available to a less-privileged actor. | Credential disclosure or confidential organization/project data exposure; a leaked signing secret enables forged webhook signatures for that endpoint. | Sensitive schema marking, redaction guidance, and lifecycle telemetry that records request metadata rather than bodies; the signing secret is read only from creation and is never sent in provider mutation bodies; data sources intentionally persist bounded raw response JSON. | Keep diagnostics and telemetry body/header-free; protect state, especially one-time signing secrets, and treat raw response JSON as potentially confidential; use synthetic test data. | [internal/provider/provider.go](../../internal/provider/provider.go#L67-L84), [internal/provider/resources/webhook_endpoint/resource_webhook_endpoint.go](../../internal/provider/resources/webhook_endpoint/resource_webhook_endpoint.go#L116-L126), [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L1450-L1456), [CONTRIBUTING.md](../../CONTRIBUTING.md#L76-L93), [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L486-L509) |
 | Medium | Acceptance tests unexpectedly mutate a real organization. | Live credentials and fixture identifiers are present and opt-in gating is bypassed or weakened. | Unintended organization, project, role, retention, or spend-control mutation. | Documented explicit opt-in and fixture requirements. | Preserve acceptance gating and never enable it in ordinary CI. | [CONTRIBUTING.md](../../CONTRIBUTING.md#L168-L173) |
 | Low / not a new capability by itself | A contributor changes a checked-in test, fixture, example, build script, generated file, or workflow script and ordinary CI executes it. | Contributor can already propose tracked repository-code changes; no bridge to protected authority exists. | Expected execution of proposed repository code under ordinary CI's existing read-only authority. | Canonical repository-code trust rule and read-only CI permissions. | Report only a concrete boundary crossing, such as protected credentials, independent lower-trust input at a sensitive sink, or privilege expansion. | [.github/workflows/ci.yml](../../.github/workflows/ci.yml#L13-L15), [.github/workflows/ci.yml](../../.github/workflows/ci.yml#L43-L162), [CONTRIBUTING.md](../../CONTRIBUTING.md#L32-L43) |
 
@@ -206,19 +225,19 @@ These are review hypotheses and calibration examples, not confirmed findings.
   publication of trusted artifacts. Cross-tenant API compromise is critical
   only when the provider actually bypasses an independently enforced API
   authorization boundary.
-- **High:** A lower-trust runtime/network input leaks the Admin credential,
-  crosses the configured-origin restriction, lets ordinary PR execution reach
-  protected release credentials, or contaminates signed artifacts despite the
-  release controls.
+- **High:** A lower-trust runtime/network input leaks an Admin or project
+  credential, crosses the configured-origin or audience-isolation restriction,
+  lets ordinary PR execution reach protected release credentials, or
+  contaminates signed artifacts despite the release controls.
 - **Medium:** A reachable boundary failure causes bounded wrong-resource
   mutation, confidential state/log exposure, malformed-response state effects,
   or production-relevant denial of service with meaningful prerequisites.
 - **Low:** A limited robustness issue has no demonstrated sensitive sink or
   meaningful new authority. Executing intentionally tracked repository code in
   ordinary CI, custom HTTPS destinations selected by the same trusted authority
-  that supplies or authorizes the key, authorized Admin API operations, and
-  hypotheses without a realistic lower-trust route are not findings by
-  themselves.
+  that supplies or authorizes the key, authorized Admin or project API
+  operations, and hypotheses without a realistic lower-trust route are not
+  findings by themselves.
 
 Severity changes with actual attacker starting capability, reachable sensitive
 sink, API-side authorization, deployment configuration, workflow permissions,

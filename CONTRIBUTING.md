@@ -73,12 +73,14 @@ implementation.
 
 ### Credentials, Terraform state, and safe examples
 
-- Never commit real OpenAI Admin API keys, access tokens, GitHub App private
+- Never commit real OpenAI Admin API keys, project API keys, access tokens, GitHub App private
   keys, GPG private keys, signing passphrases, `.env` files, customer data,
   Terraform state, saved plans, or sensitive `.tfvars` files. Supply the
-  provider's administrator credential through `OPENAI_ADMIN_KEY`; never use a
-  live key in `.tf` files, examples, fixtures, command arguments, or shell
-  history. A standard `OPENAI_API_KEY` is not a substitute for the Admin API key.
+  provider's organization-administration credential through `OPENAI_ADMIN_KEY`
+  and its project-webhook credential through `OPENAI_API_KEY`; never use a live
+  key in `.tf` files, examples, fixtures, command arguments, or shell history.
+  The two credentials are audience-specific and are not substitutes for one
+  another.
 - Use clearly fake credentials, synthetic organization/project/user data, and
   local `httptest` servers or mocks in unit tests, examples, and recorded
   responses. Keep ordinary unit tests offline and free of real credentials.

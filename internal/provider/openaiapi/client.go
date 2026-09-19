@@ -28,6 +28,7 @@ import (
 
 type APIClient struct {
 	AdminAPIKey        string
+	APIKey             string
 	BaseURL            string
 	Organization       string
 	Project            string
@@ -47,6 +48,23 @@ type APIClient struct {
 	requestObserver           func(requestObservation)
 	paginationObserver        func(paginationObservation)
 	responseCacheObserver     func(responseCacheObservation)
+}
+
+type ProviderData struct {
+	clients map[string]*APIClient
+}
+
+func NewProviderData() *ProviderData {
+	return &ProviderData{clients: make(map[string]*APIClient)}
+}
+
+func (p *ProviderData) SetClient(audience string, client *APIClient) {
+	p.clients[audience] = client
+}
+
+func (p *ProviderData) Client(audience string) (*APIClient, bool) {
+	client, ok := p.clients[audience]
+	return client, ok
 }
 
 const maxPaginatedPages = 1000
@@ -1340,6 +1358,9 @@ func ApplyStringResponseField(response map[string]any, paths []string, target *t
 			continue
 		}
 		if value == nil {
+			if required {
+				return missingRequiredResponseFieldError(paths)
+			}
 			*target = types.StringNull()
 			return nil
 		}
@@ -1365,6 +1386,9 @@ func ApplyStringListResponseField(response map[string]any, paths []string, targe
 			continue
 		}
 		if value == nil {
+			if required {
+				return missingRequiredResponseFieldError(paths)
+			}
 			*target = types.ListNull(types.StringType)
 			return nil
 		}
@@ -1383,6 +1407,34 @@ func ApplyStringListResponseField(response map[string]any, paths []string, targe
 	return nil
 }
 
+func ApplyStringSetResponseField(response map[string]any, paths []string, target *types.Set, required bool) error {
+	for _, path := range paths {
+		value, ok := responseValue(response, path)
+		if !ok {
+			continue
+		}
+		if value == nil {
+			if required {
+				return missingRequiredResponseFieldError(paths)
+			}
+			*target = types.SetNull(types.StringType)
+			return nil
+		}
+		if setValue, ok := responseStringList(value); ok {
+			*target = types.SetValueMust(types.StringType, stringListValues(setValue))
+			return nil
+		}
+		return malformedResponseFieldError(path, "a string set")
+	}
+	if required {
+		return missingRequiredResponseFieldError(paths)
+	}
+	if target.IsUnknown() {
+		*target = types.SetNull(types.StringType)
+	}
+	return nil
+}
+
 func ApplyBoolResponseField(response map[string]any, paths []string, target *types.Bool, required bool) error {
 	for _, path := range paths {
 		value, ok := responseValue(response, path)
@@ -1390,6 +1442,9 @@ func ApplyBoolResponseField(response map[string]any, paths []string, target *typ
 			continue
 		}
 		if value == nil {
+			if required {
+				return missingRequiredResponseFieldError(paths)
+			}
 			*target = types.BoolNull()
 			return nil
 		}
@@ -1415,6 +1470,9 @@ func ApplyInt64ResponseField(response map[string]any, paths []string, target *ty
 			continue
 		}
 		if value == nil {
+			if required {
+				return missingRequiredResponseFieldError(paths)
+			}
 			*target = types.Int64Null()
 			return nil
 		}
@@ -1632,5 +1690,30 @@ func (v listSizeAtLeastValidator) ValidateList(ctx context.Context, req validato
 	}
 	if len(req.ConfigValue.Elements()) < v.min {
 		resp.Diagnostics.AddAttributeError(req.Path, "Invalid list size", fmt.Sprintf("List must contain at least %d elements.", v.min))
+	}
+}
+
+type setSizeAtLeastValidator struct {
+	min int
+}
+
+func SetSizeAtLeast(min int) validator.Set {
+	return setSizeAtLeastValidator{min: min}
+}
+
+func (v setSizeAtLeastValidator) Description(ctx context.Context) string {
+	return fmt.Sprintf("set size must be at least %d", v.min)
+}
+
+func (v setSizeAtLeastValidator) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+func (v setSizeAtLeastValidator) ValidateSet(ctx context.Context, req validator.SetRequest, resp *validator.SetResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	if len(req.ConfigValue.Elements()) < v.min {
+		resp.Diagnostics.AddAttributeError(req.Path, "Invalid set size", fmt.Sprintf("Set must contain at least %d elements.", v.min))
 	}
 }

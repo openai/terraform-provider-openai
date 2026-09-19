@@ -127,11 +127,13 @@ func hostedToolResourceAndState(t *testing.T, baseURL string, capability string)
 	t.Helper()
 	ctx := context.Background()
 	managed := hostedtools.NewProjectHostedToolPermissionsResource().(*hostedtools.ProjectHostedToolPermissionsResource)
+	providerData := openaiapi.NewProviderData()
+	providerData.SetClient("admin", &openaiapi.APIClient{
+		Client: openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(baseURL+"/v1/")),
+	})
 	configureResponse := &frameworkresource.ConfigureResponse{}
 	managed.Configure(ctx, frameworkresource.ConfigureRequest{
-		ProviderData: &openaiapi.APIClient{
-			Client: openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(baseURL+"/v1/")),
-		},
+		ProviderData: providerData,
 	}, configureResponse)
 	if configureResponse.Diagnostics.HasError() {
 		t.Fatalf("configure hosted-tool resource: %#v", configureResponse.Diagnostics)

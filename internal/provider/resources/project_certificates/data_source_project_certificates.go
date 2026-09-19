@@ -115,9 +115,17 @@ func (d *ProjectCertificatesDataSource) Configure(ctx context.Context, req datas
 	if req.ProviderData == nil {
 		return
 	}
-	client, ok := req.ProviderData.(*openaiapi.APIClient)
+	providerData, ok := req.ProviderData.(*openaiapi.ProviderData)
 	if !ok {
-		resp.Diagnostics.AddError("Unexpected Data Source Configure Type", fmt.Sprintf("Expected *openaiapi.APIClient, got: %T", req.ProviderData))
+		resp.Diagnostics.AddError("Unexpected Data Source Configure Type", fmt.Sprintf("Expected *openaiapi.ProviderData, got: %T", req.ProviderData))
+		return
+	}
+	client, ok := providerData.Client("admin")
+	if !ok {
+		resp.Diagnostics.AddError(
+			"Missing OpenAI credential for admin API",
+			"Configure the provider with a credential for the admin API audience before using openai_project_certificates.",
+		)
 		return
 	}
 	d.client = client

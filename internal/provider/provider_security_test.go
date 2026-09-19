@@ -24,6 +24,16 @@ const testAdminAPIKey = "sk-admin-synthetic-test-secret"
 func configureProviderWithBaseURL(t *testing.T, baseURL string, explicit bool) provider.ConfigureResponse {
 	t.Helper()
 
+	credentialValues := map[string]string{}
+	credentialValues["admin_api_key"] = testAdminAPIKey
+	return configureProviderWithCredentialValues(t, baseURL, explicit, credentialValues)
+}
+
+func configureProviderWithCredentialValues(t *testing.T, baseURL string, explicit bool, credentialValues map[string]string) provider.ConfigureResponse {
+	t.Helper()
+	t.Setenv("OPENAI_ADMIN_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+
 	ctx := context.Background()
 	configuredProvider := &OpenAIProvider{version: "test"}
 	var schemaResponse provider.SchemaResponse
@@ -35,7 +45,9 @@ func configureProviderWithBaseURL(t *testing.T, baseURL string, explicit bool) p
 		attributeTypes[name] = tftypes.String
 		attributeValues[name] = tftypes.NewValue(tftypes.String, nil)
 	}
-	attributeValues["admin_api_key"] = tftypes.NewValue(tftypes.String, testAdminAPIKey)
+	for name, value := range credentialValues {
+		attributeValues[name] = tftypes.NewValue(tftypes.String, value)
+	}
 	if explicit {
 		attributeValues["base_url"] = tftypes.NewValue(tftypes.String, baseURL)
 	}
@@ -209,9 +221,13 @@ func TestProviderRedirectNeverSendsAdminCredentialsToAnotherOrigin(t *testing.T)
 	if response.Diagnostics.HasError() {
 		t.Fatalf("approved origin failed configuration: %v", response.Diagnostics)
 	}
-	client, ok := response.ResourceData.(*openaiapi.APIClient)
+	providerData, ok := response.ResourceData.(*openaiapi.ProviderData)
 	if !ok {
-		t.Fatalf("provider client has unexpected type %T", response.ResourceData)
+		t.Fatalf("provider data has unexpected type %T", response.ResourceData)
+	}
+	client, ok := providerData.Client("admin")
+	if !ok {
+		t.Fatal("provider data is missing the configured credential audience")
 	}
 
 	_, err := client.Request(
@@ -266,14 +282,121 @@ func TestProviderSameOriginRedirectPreservesAdminCredentials(t *testing.T) {
 	if response.Diagnostics.HasError() {
 		t.Fatalf("approved origin failed configuration: %v", response.Diagnostics)
 	}
-	client, ok := response.ResourceData.(*openaiapi.APIClient)
+	providerData, ok := response.ResourceData.(*openaiapi.ProviderData)
 	if !ok {
-		t.Fatalf("provider client has unexpected type %T", response.ResourceData)
+		t.Fatalf("provider data has unexpected type %T", response.ResourceData)
+	}
+	client, ok := providerData.Client("admin")
+	if !ok {
+		t.Fatal("provider data is missing the configured credential audience")
 	}
 	if err := client.Client.Get(context.Background(), "/organization/projects", nil, nil, option.WithMaxRetries(0)); err != nil {
 		t.Fatalf("same-origin redirect failed: %v", err)
 	}
 	if got := receivedAuthorization.Load(); got != "Bearer "+testAdminAPIKey {
 		t.Fatalf("same-origin redirect authorization = %v", got)
+	}
+}
+
+func TestProviderRoutesCredentialsByAudience(t *testing.T) {
+	receivedAuthorization := map[string]string{}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		receivedAuthorization[request.URL.Path] = request.Header.Get("Authorization")
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(writer, "{}")
+	}))
+	t.Cleanup(server.Close)
+
+	response := configureProviderWithCredentialValues(t, server.URL, true, map[string]string{
+		"admin_api_key": "synthetic-1-credential",
+		"api_key":       "synthetic-2-credential",
+	})
+	if response.Diagnostics.HasError() {
+		t.Fatalf("provider configuration failed: %v", response.Diagnostics)
+	}
+	providerData, ok := response.ResourceData.(*openaiapi.ProviderData)
+	if !ok {
+		t.Fatalf("provider data has unexpected type %T", response.ResourceData)
+	}
+
+	tests := []struct {
+		audience          string
+		path              string
+		wantAuthorization string
+	}{
+		{
+			audience:          "admin",
+			path:              "/admin",
+			wantAuthorization: "Bearer synthetic-1-credential",
+		},
+		{
+			audience:          "project",
+			path:              "/project",
+			wantAuthorization: "Bearer synthetic-2-credential",
+		},
+	}
+	for _, test := range tests {
+		client, ok := providerData.Client(test.audience)
+		if !ok {
+			t.Fatalf("provider data is missing %q audience", test.audience)
+		}
+		if _, err := client.Request(context.Background(), http.MethodGet, test.path, nil, nil, nil); err != nil {
+			t.Fatalf("%s audience request failed: %v", test.audience, err)
+		}
+		if got := receivedAuthorization[test.path]; got != test.wantAuthorization {
+			t.Fatalf("%s audience authorization = %q, want %q", test.audience, got, test.wantAuthorization)
+		}
+	}
+}
+
+func TestProviderDoesNotFallbackAcrossCredentialAudiences(t *testing.T) {
+	tests := []struct {
+		name            string
+		field           string
+		presentAudience string
+		missingAudience string
+	}{
+		{
+			name:            "only admin",
+			field:           "admin_api_key",
+			presentAudience: "admin",
+			missingAudience: "project",
+		},
+		{
+			name:            "only project",
+			field:           "api_key",
+			presentAudience: "project",
+			missingAudience: "admin",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := configureProviderWithCredentialValues(t, "https://api.openai.com/v1", true, map[string]string{
+				test.field: "synthetic-isolated-credential",
+			})
+			if response.Diagnostics.HasError() {
+				t.Fatalf("provider configuration failed: %v", response.Diagnostics)
+			}
+			providerData, ok := response.ResourceData.(*openaiapi.ProviderData)
+			if !ok {
+				t.Fatalf("provider data has unexpected type %T", response.ResourceData)
+			}
+			if _, ok := providerData.Client(test.presentAudience); !ok {
+				t.Fatalf("provider data is missing %q audience", test.presentAudience)
+			}
+			if _, ok := providerData.Client(test.missingAudience); ok {
+				t.Fatalf("provider data unexpectedly fell back from %q to %q", test.presentAudience, test.missingAudience)
+			}
+		})
+	}
+}
+
+func TestProviderRejectsMissingCredentials(t *testing.T) {
+	response := configureProviderWithCredentialValues(t, "https://api.openai.com/v1", true, nil)
+	if !response.Diagnostics.HasError() {
+		t.Fatal("provider configuration unexpectedly accepted missing credentials")
+	}
+	if response.ResourceData != nil || response.DataSourceData != nil {
+		t.Fatal("provider configuration returned data without credentials")
 	}
 }
