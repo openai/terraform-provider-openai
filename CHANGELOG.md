@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.3.0](https://github.com/openai/terraform-provider-openai/compare/v1.2.0...v1.3.0) (2026-09-19)
+
+
+### Features
+
+* add project webhook management ([#107](https://github.com/openai/terraform-provider-openai/issues/107)) ([641d883](https://github.com/openai/terraform-provider-openai/commit/641d883af05878ffe24c6b64930b0fc2a9e2a6e2))
+
+
+### Bug Fixes
+
+* automate release tags and draft publication ([#105](https://github.com/openai/terraform-provider-openai/issues/105)) ([ef548b2](https://github.com/openai/terraform-provider-openai/commit/ef548b2d6984bedf7c857aee3a1d2ca31ffb0082))
+* clarify credential audiences and webhook beta status ([#108](https://github.com/openai/terraform-provider-openai/issues/108)) ([51164c1](https://github.com/openai/terraform-provider-openai/commit/51164c155dc525975bfe5d08ba718b378ce7753e))
+
 ## [1.2.0](https://github.com/openai/terraform-provider-openai/compare/v1.1.2...v1.2.0) (2026-09-18)
 
 
