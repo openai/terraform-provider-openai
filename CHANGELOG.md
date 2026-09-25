@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/openai/terraform-provider-openai/compare/v1.3.0...v1.3.1) (2026-09-25)
+
+
+### Bug Fixes
+
+* default omitted invite projects to an empty list ([#113](https://github.com/openai/terraform-provider-openai/issues/113)) ([44cf3d1](https://github.com/openai/terraform-provider-openai/commit/44cf3d1537fbdae5a1066646a7971817e7a77179))
+
 ## [1.3.0](https://github.com/openai/terraform-provider-openai/compare/v1.2.0...v1.3.0) (2026-09-19)
 
 
