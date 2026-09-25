@@ -36,6 +36,18 @@ type InvitesDataSourceItemModel struct {
 	AcceptedAt types.Int64  `tfsdk:"accepted_at"`
 }
 
+func (InvitesDataSourceItemModel) AttributeTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"id":          types.StringType,
+		"email":       types.StringType,
+		"role":        types.StringType,
+		"status":      types.StringType,
+		"created_at":  types.Int64Type,
+		"expires_at":  types.Int64Type,
+		"accepted_at": types.Int64Type,
+	}
+}
+
 func NewInvitesDataSource() datasource.DataSource {
 	return &InvitesDataSource{}
 }
@@ -182,15 +194,7 @@ func (d *InvitesDataSource) Read(ctx context.Context, req datasource.ReadRequest
 		}
 		items = append(items, item)
 	}
-	itemsValue, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: map[string]attr.Type{
-		"id":          types.StringType,
-		"email":       types.StringType,
-		"role":        types.StringType,
-		"status":      types.StringType,
-		"created_at":  types.Int64Type,
-		"expires_at":  types.Int64Type,
-		"accepted_at": types.Int64Type,
-	}}, items)
+	itemsValue, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: InvitesDataSourceItemModel{}.AttributeTypes()}, items)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return

@@ -36,6 +36,16 @@ type ProjectUsersDataSourceItemModel struct {
 	AddedAt types.Int64  `tfsdk:"added_at"`
 }
 
+func (ProjectUsersDataSourceItemModel) AttributeTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"id":       types.StringType,
+		"name":     types.StringType,
+		"email":    types.StringType,
+		"role":     types.StringType,
+		"added_at": types.Int64Type,
+	}
+}
+
 func NewProjectUsersDataSource() datasource.DataSource {
 	return &ProjectUsersDataSource{}
 }
@@ -179,13 +189,7 @@ func (d *ProjectUsersDataSource) Read(ctx context.Context, req datasource.ReadRe
 		}
 		items = append(items, item)
 	}
-	itemsValue, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: map[string]attr.Type{
-		"id":       types.StringType,
-		"name":     types.StringType,
-		"email":    types.StringType,
-		"role":     types.StringType,
-		"added_at": types.Int64Type,
-	}}, items)
+	itemsValue, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: ProjectUsersDataSourceItemModel{}.AttributeTypes()}, items)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return

@@ -39,6 +39,19 @@ type ProjectRateLimitsDataSourceItemModel struct {
 	Batch1DayMaxInputTokens     types.Int64  `tfsdk:"batch_1_day_max_input_tokens"`
 }
 
+func (ProjectRateLimitsDataSourceItemModel) AttributeTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"id":                               types.StringType,
+		"model":                            types.StringType,
+		"max_requests_per_1_minute":        types.Int64Type,
+		"max_tokens_per_1_minute":          types.Int64Type,
+		"max_images_per_1_minute":          types.Int64Type,
+		"max_audio_megabytes_per_1_minute": types.Int64Type,
+		"max_requests_per_1_day":           types.Int64Type,
+		"batch_1_day_max_input_tokens":     types.Int64Type,
+	}
+}
+
 func NewProjectRateLimitsDataSource() datasource.DataSource {
 	return &ProjectRateLimitsDataSource{}
 }
@@ -206,16 +219,7 @@ func (d *ProjectRateLimitsDataSource) Read(ctx context.Context, req datasource.R
 		}
 		items = append(items, item)
 	}
-	itemsValue, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: map[string]attr.Type{
-		"id":                               types.StringType,
-		"model":                            types.StringType,
-		"max_requests_per_1_minute":        types.Int64Type,
-		"max_tokens_per_1_minute":          types.Int64Type,
-		"max_images_per_1_minute":          types.Int64Type,
-		"max_audio_megabytes_per_1_minute": types.Int64Type,
-		"max_requests_per_1_day":           types.Int64Type,
-		"batch_1_day_max_input_tokens":     types.Int64Type,
-	}}, items)
+	itemsValue, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: ProjectRateLimitsDataSourceItemModel{}.AttributeTypes()}, items)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return

@@ -37,6 +37,17 @@ type ProjectCertificatesDataSourceItemModel struct {
 	Active    types.Bool   `tfsdk:"active"`
 }
 
+func (ProjectCertificatesDataSourceItemModel) AttributeTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"id":         types.StringType,
+		"name":       types.StringType,
+		"created_at": types.Int64Type,
+		"valid_at":   types.Int64Type,
+		"expires_at": types.Int64Type,
+		"active":     types.BoolType,
+	}
+}
+
 func NewProjectCertificatesDataSource() datasource.DataSource {
 	return &ProjectCertificatesDataSource{}
 }
@@ -188,14 +199,7 @@ func (d *ProjectCertificatesDataSource) Read(ctx context.Context, req datasource
 		}
 		items = append(items, item)
 	}
-	itemsValue, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: map[string]attr.Type{
-		"id":         types.StringType,
-		"name":       types.StringType,
-		"created_at": types.Int64Type,
-		"valid_at":   types.Int64Type,
-		"expires_at": types.Int64Type,
-		"active":     types.BoolType,
-	}}, items)
+	itemsValue, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: ProjectCertificatesDataSourceItemModel{}.AttributeTypes()}, items)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return

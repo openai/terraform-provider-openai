@@ -38,6 +38,18 @@ type ProjectSpendAlertsDataSourceItemModel struct {
 	NotificationChannelSubjectPrefix types.String `tfsdk:"notification_channel_subject_prefix"`
 }
 
+func (ProjectSpendAlertsDataSourceItemModel) AttributeTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"id":                                  types.StringType,
+		"threshold_amount":                    types.Int64Type,
+		"currency":                            types.StringType,
+		"interval":                            types.StringType,
+		"notification_channel_type":           types.StringType,
+		"notification_channel_recipients":     types.ListType{ElemType: types.StringType},
+		"notification_channel_subject_prefix": types.StringType,
+	}
+}
+
 func NewProjectSpendAlertsDataSource() datasource.DataSource {
 	return &ProjectSpendAlertsDataSource{}
 }
@@ -198,15 +210,7 @@ func (d *ProjectSpendAlertsDataSource) Read(ctx context.Context, req datasource.
 		}
 		items = append(items, item)
 	}
-	itemsValue, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: map[string]attr.Type{
-		"id":                                  types.StringType,
-		"threshold_amount":                    types.Int64Type,
-		"currency":                            types.StringType,
-		"interval":                            types.StringType,
-		"notification_channel_type":           types.StringType,
-		"notification_channel_recipients":     types.ListType{ElemType: types.StringType},
-		"notification_channel_subject_prefix": types.StringType,
-	}}, items)
+	itemsValue, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: ProjectSpendAlertsDataSourceItemModel{}.AttributeTypes()}, items)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return

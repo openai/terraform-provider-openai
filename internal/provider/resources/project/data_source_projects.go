@@ -35,6 +35,17 @@ type ProjectsDataSourceItemModel struct {
 	Status        types.String `tfsdk:"status"`
 }
 
+func (ProjectsDataSourceItemModel) AttributeTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"id":              types.StringType,
+		"name":            types.StringType,
+		"external_key_id": types.StringType,
+		"created_at":      types.Int64Type,
+		"archived_at":     types.Int64Type,
+		"status":          types.StringType,
+	}
+}
+
 func NewProjectsDataSource() datasource.DataSource {
 	return &ProjectsDataSource{}
 }
@@ -174,14 +185,7 @@ func (d *ProjectsDataSource) Read(ctx context.Context, req datasource.ReadReques
 		}
 		items = append(items, item)
 	}
-	itemsValue, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: map[string]attr.Type{
-		"id":              types.StringType,
-		"name":            types.StringType,
-		"external_key_id": types.StringType,
-		"created_at":      types.Int64Type,
-		"archived_at":     types.Int64Type,
-		"status":          types.StringType,
-	}}, items)
+	itemsValue, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: ProjectsDataSourceItemModel{}.AttributeTypes()}, items)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return

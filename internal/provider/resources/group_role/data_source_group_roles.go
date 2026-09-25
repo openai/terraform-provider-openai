@@ -37,6 +37,17 @@ type GroupRolesDataSourceItemModel struct {
 	PredefinedRole types.Bool   `tfsdk:"predefined_role"`
 }
 
+func (GroupRolesDataSourceItemModel) AttributeTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"id":              types.StringType,
+		"name":            types.StringType,
+		"description":     types.StringType,
+		"permissions":     types.ListType{ElemType: types.StringType},
+		"resource_type":   types.StringType,
+		"predefined_role": types.BoolType,
+	}
+}
+
 func NewGroupRolesDataSource() datasource.DataSource {
 	return &GroupRolesDataSource{}
 }
@@ -189,14 +200,7 @@ func (d *GroupRolesDataSource) Read(ctx context.Context, req datasource.ReadRequ
 		}
 		items = append(items, item)
 	}
-	itemsValue, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: map[string]attr.Type{
-		"id":              types.StringType,
-		"name":            types.StringType,
-		"description":     types.StringType,
-		"permissions":     types.ListType{ElemType: types.StringType},
-		"resource_type":   types.StringType,
-		"predefined_role": types.BoolType,
-	}}, items)
+	itemsValue, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: GroupRolesDataSourceItemModel{}.AttributeTypes()}, items)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return

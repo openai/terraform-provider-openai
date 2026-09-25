@@ -34,6 +34,16 @@ type GroupsDataSourceItemModel struct {
 	GroupType     types.String `tfsdk:"group_type"`
 }
 
+func (GroupsDataSourceItemModel) AttributeTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"id":              types.StringType,
+		"name":            types.StringType,
+		"created_at":      types.Int64Type,
+		"is_scim_managed": types.BoolType,
+		"group_type":      types.StringType,
+	}
+}
+
 func NewGroupsDataSource() datasource.DataSource {
 	return &GroupsDataSource{}
 }
@@ -164,13 +174,7 @@ func (d *GroupsDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 		}
 		items = append(items, item)
 	}
-	itemsValue, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: map[string]attr.Type{
-		"id":              types.StringType,
-		"name":            types.StringType,
-		"created_at":      types.Int64Type,
-		"is_scim_managed": types.BoolType,
-		"group_type":      types.StringType,
-	}}, items)
+	itemsValue, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: GroupsDataSourceItemModel{}.AttributeTypes()}, items)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
