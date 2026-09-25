@@ -37,6 +37,19 @@ type WebhookEndpointsDataSourceItemModel struct {
 	SigningSecretHint types.String `tfsdk:"signing_secret_hint"`
 }
 
+func (WebhookEndpointsDataSourceItemModel) AttributeTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"id":                  types.StringType,
+		"name":                types.StringType,
+		"url":                 types.StringType,
+		"event_types":         types.SetType{ElemType: types.StringType},
+		"object":              types.StringType,
+		"created_at":          types.Int64Type,
+		"updated_at":          types.Int64Type,
+		"signing_secret_hint": types.StringType,
+	}
+}
+
 func NewWebhookEndpointsDataSource() datasource.DataSource {
 	return &WebhookEndpointsDataSource{}
 }
@@ -193,16 +206,7 @@ func (d *WebhookEndpointsDataSource) Read(ctx context.Context, req datasource.Re
 		}
 		items = append(items, item)
 	}
-	itemsValue, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: map[string]attr.Type{
-		"id":                  types.StringType,
-		"name":                types.StringType,
-		"url":                 types.StringType,
-		"event_types":         types.SetType{ElemType: types.StringType},
-		"object":              types.StringType,
-		"created_at":          types.Int64Type,
-		"updated_at":          types.Int64Type,
-		"signing_secret_hint": types.StringType,
-	}}, items)
+	itemsValue, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: WebhookEndpointsDataSourceItemModel{}.AttributeTypes()}, items)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return

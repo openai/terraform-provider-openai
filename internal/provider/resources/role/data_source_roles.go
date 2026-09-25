@@ -35,6 +35,17 @@ type RolesDataSourceItemModel struct {
 	PredefinedRole types.Bool   `tfsdk:"predefined_role"`
 }
 
+func (RolesDataSourceItemModel) AttributeTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"id":              types.StringType,
+		"name":            types.StringType,
+		"description":     types.StringType,
+		"permissions":     types.ListType{ElemType: types.StringType},
+		"resource_type":   types.StringType,
+		"predefined_role": types.BoolType,
+	}
+}
+
 func NewRolesDataSource() datasource.DataSource {
 	return &RolesDataSource{}
 }
@@ -174,14 +185,7 @@ func (d *RolesDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 		}
 		items = append(items, item)
 	}
-	itemsValue, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: map[string]attr.Type{
-		"id":              types.StringType,
-		"name":            types.StringType,
-		"description":     types.StringType,
-		"permissions":     types.ListType{ElemType: types.StringType},
-		"resource_type":   types.StringType,
-		"predefined_role": types.BoolType,
-	}}, items)
+	itemsValue, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: RolesDataSourceItemModel{}.AttributeTypes()}, items)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return

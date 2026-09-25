@@ -12,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -43,6 +44,13 @@ type InviteResourceModel struct {
 type InviteProjectModel struct {
 	ID   types.String `tfsdk:"id"`
 	Role types.String `tfsdk:"role"`
+}
+
+func (InviteProjectModel) AttributeTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"id":   types.StringType,
+		"role": types.StringType,
+	}
 }
 
 func NewInviteResource() resource.Resource {
@@ -112,6 +120,7 @@ func (r *InviteResource) Schema(ctx context.Context, req resource.SchemaRequest,
 				Optional:            true,
 				Computed:            true,
 				Sensitive:           false,
+				Default:             listdefault.StaticValue(types.ListValueMust(types.ObjectType{AttrTypes: InviteProjectModel{}.AttributeTypes()}, []attr.Value{})),
 				PlanModifiers: []planmodifier.List{
 					listplanmodifier.RequiresReplace(),
 				},
@@ -253,10 +262,7 @@ func (r *InviteResource) Create(ctx context.Context, req resource.CreateRequest,
 	}
 	if projectsResultItems == nil {
 		if data.Projects.IsUnknown() {
-			data.Projects = types.ListNull(types.ObjectType{AttrTypes: map[string]attr.Type{
-				"id":   types.StringType,
-				"role": types.StringType,
-			}})
+			data.Projects = types.ListNull(types.ObjectType{AttrTypes: InviteProjectModel{}.AttributeTypes()})
 		}
 	} else {
 		projectsItems := []InviteProjectModel{}
@@ -272,10 +278,7 @@ func (r *InviteResource) Create(ctx context.Context, req resource.CreateRequest,
 			}
 			projectsItems = append(projectsItems, project)
 		}
-		projectsItemsValue, projectsDiags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: map[string]attr.Type{
-			"id":   types.StringType,
-			"role": types.StringType,
-		}}, projectsItems)
+		projectsItemsValue, projectsDiags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: InviteProjectModel{}.AttributeTypes()}, projectsItems)
 		resp.Diagnostics.Append(projectsDiags...)
 		if resp.Diagnostics.HasError() {
 			return
@@ -347,10 +350,7 @@ func (r *InviteResource) Read(ctx context.Context, req resource.ReadRequest, res
 	}
 	if projectsResultItems == nil {
 		if data.Projects.IsUnknown() {
-			data.Projects = types.ListNull(types.ObjectType{AttrTypes: map[string]attr.Type{
-				"id":   types.StringType,
-				"role": types.StringType,
-			}})
+			data.Projects = types.ListNull(types.ObjectType{AttrTypes: InviteProjectModel{}.AttributeTypes()})
 		}
 	} else {
 		projectsItems := []InviteProjectModel{}
@@ -366,10 +366,7 @@ func (r *InviteResource) Read(ctx context.Context, req resource.ReadRequest, res
 			}
 			projectsItems = append(projectsItems, project)
 		}
-		projectsItemsValue, projectsDiags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: map[string]attr.Type{
-			"id":   types.StringType,
-			"role": types.StringType,
-		}}, projectsItems)
+		projectsItemsValue, projectsDiags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: InviteProjectModel{}.AttributeTypes()}, projectsItems)
 		resp.Diagnostics.Append(projectsDiags...)
 		if resp.Diagnostics.HasError() {
 			return

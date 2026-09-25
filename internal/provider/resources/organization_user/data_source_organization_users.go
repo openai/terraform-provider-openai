@@ -42,6 +42,24 @@ type OrganizationUsersDataSourceItemModel struct {
 	DeveloperPersona               types.String `tfsdk:"developer_persona"`
 }
 
+func (OrganizationUsersDataSourceItemModel) AttributeTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"id":                                 types.StringType,
+		"name":                               types.StringType,
+		"email":                              types.StringType,
+		"role":                               types.StringType,
+		"added_at":                           types.Int64Type,
+		"is_default":                         types.BoolType,
+		"created":                            types.Int64Type,
+		"is_service_account":                 types.BoolType,
+		"is_scale_tier_authorized_purchaser": types.BoolType,
+		"is_scim_managed":                    types.BoolType,
+		"api_key_last_used_at":               types.Int64Type,
+		"technical_level":                    types.StringType,
+		"developer_persona":                  types.StringType,
+	}
+}
+
 func NewOrganizationUsersDataSource() datasource.DataSource {
 	return &OrganizationUsersDataSource{}
 }
@@ -236,21 +254,7 @@ func (d *OrganizationUsersDataSource) Read(ctx context.Context, req datasource.R
 		}
 		items = append(items, item)
 	}
-	itemsValue, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: map[string]attr.Type{
-		"id":                                 types.StringType,
-		"name":                               types.StringType,
-		"email":                              types.StringType,
-		"role":                               types.StringType,
-		"added_at":                           types.Int64Type,
-		"is_default":                         types.BoolType,
-		"created":                            types.Int64Type,
-		"is_service_account":                 types.BoolType,
-		"is_scale_tier_authorized_purchaser": types.BoolType,
-		"is_scim_managed":                    types.BoolType,
-		"api_key_last_used_at":               types.Int64Type,
-		"technical_level":                    types.StringType,
-		"developer_persona":                  types.StringType,
-	}}, items)
+	itemsValue, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: OrganizationUsersDataSourceItemModel{}.AttributeTypes()}, items)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return

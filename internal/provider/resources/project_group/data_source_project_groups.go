@@ -36,6 +36,16 @@ type ProjectGroupsDataSourceItemModel struct {
 	CreatedAt types.Int64  `tfsdk:"created_at"`
 }
 
+func (ProjectGroupsDataSourceItemModel) AttributeTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"project_id": types.StringType,
+		"group_id":   types.StringType,
+		"group_name": types.StringType,
+		"group_type": types.StringType,
+		"created_at": types.Int64Type,
+	}
+}
+
 func NewProjectGroupsDataSource() datasource.DataSource {
 	return &ProjectGroupsDataSource{}
 }
@@ -179,13 +189,7 @@ func (d *ProjectGroupsDataSource) Read(ctx context.Context, req datasource.ReadR
 		}
 		items = append(items, item)
 	}
-	itemsValue, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: map[string]attr.Type{
-		"project_id": types.StringType,
-		"group_id":   types.StringType,
-		"group_name": types.StringType,
-		"group_type": types.StringType,
-		"created_at": types.Int64Type,
-	}}, items)
+	itemsValue, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: ProjectGroupsDataSourceItemModel{}.AttributeTypes()}, items)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return

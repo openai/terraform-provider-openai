@@ -33,6 +33,15 @@ type OrganizationSpendAlertsDataSourceItemModel struct {
 	Interval        types.String `tfsdk:"interval"`
 }
 
+func (OrganizationSpendAlertsDataSourceItemModel) AttributeTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"id":               types.StringType,
+		"threshold_amount": types.Int64Type,
+		"currency":         types.StringType,
+		"interval":         types.StringType,
+	}
+}
+
 func NewOrganizationSpendAlertsDataSource() datasource.DataSource {
 	return &OrganizationSpendAlertsDataSource{}
 }
@@ -155,12 +164,7 @@ func (d *OrganizationSpendAlertsDataSource) Read(ctx context.Context, req dataso
 		}
 		items = append(items, item)
 	}
-	itemsValue, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: map[string]attr.Type{
-		"id":               types.StringType,
-		"threshold_amount": types.Int64Type,
-		"currency":         types.StringType,
-		"interval":         types.StringType,
-	}}, items)
+	itemsValue, diags := types.ListValueFrom(ctx, types.ObjectType{AttrTypes: OrganizationSpendAlertsDataSourceItemModel{}.AttributeTypes()}, items)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
