@@ -24,6 +24,7 @@ import (
 	provider "github.com/openai/terraform-provider-openai/internal/provider"
 	openaiapi "github.com/openai/terraform-provider-openai/internal/provider/openaiapi"
 	hostedtools "github.com/openai/terraform-provider-openai/internal/provider/resources/project_hosted_tool_permissions"
+	"github.com/openai/terraform-provider-openai/internal/testserver"
 )
 
 var hostedToolCapabilities = []string{
@@ -49,7 +50,7 @@ type hostedToolServerState struct {
 func newHostedToolServer(t *testing.T) (*httptest.Server, *hostedToolServerState) {
 	t.Helper()
 	state := &hostedToolServerState{projects: map[string]map[string]bool{}}
-	server := httptest.NewServer(http.HandlerFunc(state.handle))
+	server := testserver.New(t, http.HandlerFunc(state.handle))
 	t.Cleanup(server.Close)
 	return server, state
 }

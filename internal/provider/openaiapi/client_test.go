@@ -22,13 +22,14 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/terraform-provider-openai/internal/testserver"
 )
 
 func TestRequestExpandsPathQueryAndUserAgent(t *testing.T) {
 	var gotPath string
 	var gotLimit string
 	var gotUserAgent string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotLimit = r.URL.Query().Get("limit")
 		gotUserAgent = r.Header.Get("User-Agent")
@@ -68,7 +69,7 @@ func TestRequestExpandsPathQueryAndUserAgent(t *testing.T) {
 
 func TestRequestRejectsPathDotSegments(t *testing.T) {
 	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		http.Error(w, "unexpected request", http.StatusInternalServerError)
 	}))
@@ -361,7 +362,7 @@ func TestRequestRejectsOversizedResponsesWithoutRetry(t *testing.T) {
 				t.Fatal(err)
 			}
 			var calls atomic.Int64
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls.Add(1)
 				w.Header().Set("Content-Type", "application/json")
 				if test.statusCode >= http.StatusInternalServerError {
@@ -410,7 +411,7 @@ func TestRequestAcceptsLargeOrganizationPayloadAtLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Length", fmt.Sprint(len(payload)))
 		_, _ = w.Write(payload)
@@ -468,7 +469,7 @@ func TestPaginatedRequestBoundsAggregateResponseBytes(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			var calls atomic.Int64
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				call := calls.Add(1)
 				w.Header().Set("Content-Type", "application/json")
 				if test.retry && call == 1 {
@@ -539,7 +540,7 @@ func TestPaginatedRequestBoundsAggregateResponseBytes(t *testing.T) {
 
 func TestCachedRequestsRejectOversizedResponses(t *testing.T) {
 	var calls atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		call := calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		itemID := "member-1"
@@ -641,7 +642,7 @@ func TestRequestSharesRetryAfterCooldown(t *testing.T) {
 	var calls atomic.Int64
 	var callsMu sync.Mutex
 	var callTimes []time.Time
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		call := calls.Add(1)
 		callsMu.Lock()
 		callTimes = append(callTimes, time.Now())
@@ -817,7 +818,7 @@ func TestRetryAfterCooldownDoesNotClearNewerGeneration(t *testing.T) {
 }
 
 func TestRequestAttemptTimingExcludesSharedCooldown(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"id": "group-1"})
 	}))
@@ -860,7 +861,7 @@ func TestRequestAttemptTimingExcludesSharedCooldown(t *testing.T) {
 
 func TestRequestReportsZeroAttemptsWhenCooldownExhaustsLifecycle(t *testing.T) {
 	var calls atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"id": "group-1"})
@@ -888,7 +889,7 @@ func TestRequestReportsZeroAttemptsWhenCooldownExhaustsLifecycle(t *testing.T) {
 
 func TestRequestBoundsRetryLifecycleAndRedactsTelemetry(t *testing.T) {
 	var calls atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Retry-After", "10")
@@ -987,7 +988,7 @@ func TestRequestBoundsRetryLifecycleAndRedactsTelemetry(t *testing.T) {
 }
 
 func TestRequestRecordsUnknownMutationResponseBytes(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.(http.Flusher).Flush()
@@ -1041,7 +1042,7 @@ func TestRequestRecordsUnknownMutationResponseBytes(t *testing.T) {
 
 func TestRequestRetriesTimedOutGETAttempt(t *testing.T) {
 	var calls atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		call := calls.Add(1)
 		if call == 1 {
 			<-r.Context().Done()
@@ -1105,7 +1106,7 @@ func TestRequestRetriesTimedOutGETAttempt(t *testing.T) {
 
 func TestRequestRetriesTimedOutGETResponseBody(t *testing.T) {
 	var calls atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		call := calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		if call == 1 {
@@ -1153,7 +1154,7 @@ func TestRequestPreservesRetryAfterWhenGETResponseBodyTimesOut(t *testing.T) {
 	var calls atomic.Int64
 	var callsMu sync.Mutex
 	var callTimes []time.Time
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		call := calls.Add(1)
 		callsMu.Lock()
 		callTimes = append(callTimes, time.Now())
@@ -1208,7 +1209,7 @@ func TestRequestPreservesRetryAfterWhenGETResponseBodyTimesOut(t *testing.T) {
 }
 
 func TestRequestKeepsGETAttemptContextThroughResponseBody(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		if flusher, ok := w.(http.Flusher); ok {
@@ -1247,7 +1248,7 @@ func TestRequestKeepsGETAttemptContextThroughResponseBody(t *testing.T) {
 
 func TestRequestReportsExhaustedGETAttemptTimeouts(t *testing.T) {
 	var calls atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		<-r.Context().Done()
 	}))
@@ -1286,7 +1287,7 @@ func TestRequestReportsExhaustedGETAttemptTimeouts(t *testing.T) {
 
 func TestRequestDoesNotApplyAttemptTimeoutToMutation(t *testing.T) {
 	var calls atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		time.Sleep(25 * time.Millisecond)
 		w.Header().Set("Content-Type", "application/json")
@@ -1321,7 +1322,7 @@ func TestRequestDoesNotApplyAttemptTimeoutToMutation(t *testing.T) {
 
 func TestRequestUsesAdditionalRetriesForReads(t *testing.T) {
 	var calls atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		call := calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		if call <= defaultReadRequestMaxRetries {
@@ -1357,7 +1358,7 @@ func TestRequestUsesAdditionalRetriesForReads(t *testing.T) {
 
 func TestRequestKeepsDefaultRetryBudgetForMutations(t *testing.T) {
 	var calls atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Retry-After-Ms", "1")
@@ -1385,7 +1386,7 @@ func TestRequestKeepsDefaultRetryBudgetForMutations(t *testing.T) {
 
 func TestRequestRecordsRetryAttempts(t *testing.T) {
 	var calls atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		call := calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		if call == 1 {
@@ -1474,7 +1475,7 @@ func TestRequestWaitsForPendingObservationBeforeLifecycleCompletion(t *testing.T
 	releasePending := make(chan struct{})
 	attemptCompleted := make(chan struct{})
 	lifecycleCompleted := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-pendingStarted
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"id": "group-1"})
@@ -1568,7 +1569,7 @@ func TestClassifyRequestOutcome(t *testing.T) {
 
 func TestPaginatedRequestFollowsNextCursor(t *testing.T) {
 	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Query().Get("after") {
@@ -1617,7 +1618,7 @@ func TestPaginatedRequestFollowsNextCursor(t *testing.T) {
 }
 
 func TestPaginatedRequestClassifiesAPIErrors(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -1652,7 +1653,7 @@ func TestPaginatedRequestClassifiesAPIErrors(t *testing.T) {
 }
 
 func TestPaginatedRequestRejectsRepeatedCursor(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"data":     []map[string]any{{"id": "role_1"}},
@@ -1702,7 +1703,7 @@ func TestPaginatedRequestRejectsMalformedPageFields(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(test.response)
 			}))
@@ -1727,7 +1728,7 @@ func TestPaginatedRequestRejectsMalformedPageFields(t *testing.T) {
 }
 
 func TestPaginatedRequestRejectsMissingCursorWhenMorePagesRemain(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"data":     []any{},
@@ -1754,7 +1755,7 @@ func TestPaginatedRequestRejectsMissingCursorWhenMorePagesRemain(t *testing.T) {
 
 func TestCachedRequestCachesOnlyTheFirstPage(t *testing.T) {
 	var calls atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -1797,7 +1798,7 @@ func TestCachedRequestCachesOnlyTheFirstPage(t *testing.T) {
 
 func TestCachedPaginatedRequestCoalescesConcurrentCalls(t *testing.T) {
 	var calls atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Query().Get("after") {
@@ -1887,7 +1888,7 @@ func TestCachedPaginatedRequestCoalescesConcurrentCalls(t *testing.T) {
 
 func TestCachedPaginatedRequestSupportsSingletonCache(t *testing.T) {
 	var calls atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -1939,7 +1940,7 @@ func TestCachedPaginatedRequestSupportsSingletonCache(t *testing.T) {
 }
 
 func TestCachedPaginatedRequestReportsSanitizedCacheAndPaginationTelemetry(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Query().Get("after") {
 		case "":
@@ -2087,7 +2088,7 @@ func TestCachedPaginatedRequestRetriesAfterInFlightInvalidation(t *testing.T) {
 	releaseFirst := make(chan struct{})
 	var releaseFirstOnce sync.Once
 	release := func() { releaseFirstOnce.Do(func() { close(releaseFirst) }) }
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		call := calls.Add(1)
 		if call == 1 {
 			close(firstStarted)

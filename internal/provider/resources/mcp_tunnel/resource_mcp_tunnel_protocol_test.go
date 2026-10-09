@@ -26,6 +26,7 @@ import (
 	"github.com/openai/openai-go/v3/option"
 	provider "github.com/openai/terraform-provider-openai/internal/provider"
 	"github.com/openai/terraform-provider-openai/internal/provider/openaiapi"
+	"github.com/openai/terraform-provider-openai/internal/testserver"
 )
 
 const tunnelTestID = "tunnel_00000000000000000000000000000001"
@@ -46,7 +47,7 @@ type tunnelServerState struct {
 func newTunnelServer(t *testing.T) (*httptest.Server, *tunnelServerState) {
 	t.Helper()
 	state := &tunnelServerState{}
-	server := httptest.NewServer(http.HandlerFunc(state.handle))
+	server := testserver.New(t, http.HandlerFunc(state.handle))
 	t.Cleanup(server.Close)
 	return server, state
 }
@@ -282,7 +283,7 @@ func TestMCPTunnelNotFoundDistinguishesMissingTunnelFromUnavailableRoute(t *test
 			{name: "unauthorized", status: http.StatusUnauthorized, message: "Invalid API key"},
 		} {
 			t.Run(method+"/"+test.name, func(t *testing.T) {
-				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 					if req.Method != method || req.URL.Path != "/v1/tunnels/"+tunnelTestID {
 						t.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
 					}
@@ -323,7 +324,7 @@ func TestMCPTunnelRejectsInvalidImportIdentifiers(t *testing.T) {
 
 func TestMCPTunnelCreateDoesNotRetryAmbiguousFailure(t *testing.T) {
 	var requests atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		requests.Add(1)
 		if req.Method != http.MethodPost || req.URL.Path != "/v1/tunnels" {
 			t.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)

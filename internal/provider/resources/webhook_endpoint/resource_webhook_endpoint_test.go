@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"reflect"
 	"testing"
 
@@ -21,6 +20,7 @@ import (
 	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	openaiapi "github.com/openai/terraform-provider-openai/internal/provider/openaiapi"
+	"github.com/openai/terraform-provider-openai/internal/testserver"
 )
 
 const (
@@ -147,7 +147,7 @@ func writeWebhookEndpoint(w http.ResponseWriter, name string, includeSecret bool
 }
 
 func TestWebhookEndpointCreateRejectsNullSigningSecret(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		response := webhookEndpointResponse("created")
 		response["signing_secret"] = nil
 		w.Header().Set("Content-Type", "application/json")
@@ -179,7 +179,7 @@ func TestWebhookEndpointCreateRejectsNullSigningSecret(t *testing.T) {
 func TestWebhookEndpointLifecyclePreservesCreateOnlySigningSecret(t *testing.T) {
 	var requestBodies []map[string]any
 	var requests []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if got := req.Header.Get("Authorization"); got != "Bearer "+webhookTestAPIKey {
 			t.Errorf("authorization = %q", got)
 		}
@@ -320,7 +320,7 @@ func TestWebhookEndpointLifecyclePreservesCreateOnlySigningSecret(t *testing.T) 
 }
 
 func TestWebhookEndpointImportCannotRecoverSigningSecret(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.Method != http.MethodGet || req.URL.Path != "/v1/webhook_endpoints/"+webhookTestID {
 			http.Error(w, "unexpected request", http.StatusNotFound)
 			return

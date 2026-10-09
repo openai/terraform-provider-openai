@@ -15,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	provider "github.com/openai/terraform-provider-openai/internal/provider"
+	"github.com/openai/terraform-provider-openai/internal/testserver"
 )
 
 type spendLimitServerState struct {
@@ -39,7 +40,7 @@ func newSpendLimitServer(t *testing.T) (*httptest.Server, *spendLimitServerState
 		threshold: 10000,
 		status:    "inactive",
 	}
-	server := httptest.NewServer(http.HandlerFunc(state.handle))
+	server := testserver.New(t, http.HandlerFunc(state.handle))
 	t.Cleanup(server.Close)
 	return server, state
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"github.com/openai/openai-go/v3/option"
 	openaiapi "github.com/openai/terraform-provider-openai/internal/provider/openaiapi"
+	"github.com/openai/terraform-provider-openai/internal/testserver"
 )
 
 const testAdminAPIKey = "sk-admin-synthetic-test-secret"
@@ -214,7 +215,7 @@ func TestProviderRedirectNeverSendsAdminCredentialsToAnotherOrigin(t *testing.T)
 	const rawRedirectCredentials = "example-user:example-password@"
 	const rawRedirectQuery = "?X-Amz-Signature=example-signature&token=example-token#example-fragment"
 	var redirectedRequests atomic.Int32
-	unapprovedServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	unapprovedServer := testserver.New(t, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		redirectedRequests.Add(1)
 		writer.WriteHeader(http.StatusOK)
 	}))
@@ -222,7 +223,7 @@ func TestProviderRedirectNeverSendsAdminCredentialsToAnotherOrigin(t *testing.T)
 
 	var approvedRequests atomic.Int32
 	var approvedAuthorization atomic.Value
-	approvedServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	approvedServer := testserver.New(t, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		approvedRequests.Add(1)
 		approvedAuthorization.Store(request.Header.Get("Authorization"))
 		redirectURL := strings.Replace(unapprovedServer.URL, "://", "://"+rawRedirectCredentials, 1) + "/capture" + rawRedirectQuery
@@ -280,7 +281,7 @@ func TestProviderRedirectNeverSendsAdminCredentialsToAnotherOrigin(t *testing.T)
 
 func TestProviderSameOriginRedirectPreservesAdminCredentials(t *testing.T) {
 	var receivedAuthorization atomic.Value
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/organization/projects" {
 			http.Redirect(writer, request, "/approved", http.StatusTemporaryRedirect)
 			return
@@ -434,7 +435,7 @@ func TestProviderTreatsBlankAmbientProjectCredentialAsMissing(t *testing.T) {
 
 func TestProviderRoutesCredentialsByAudience(t *testing.T) {
 	receivedAuthorization := map[string]string{}
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := testserver.New(t, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		receivedAuthorization[request.URL.Path] = request.Header.Get("Authorization")
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(writer, "{}")
