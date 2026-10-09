@@ -1057,10 +1057,11 @@ func TestRequestRetriesTimedOutGETAttempt(t *testing.T) {
 	var observationsMu sync.Mutex
 	var observations []requestObservation
 	client := &APIClient{
-		ProviderVersion:       "test",
-		Client:                openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
-		requestTimeout:        2 * time.Second,
-		requestAttemptTimeout: 10 * time.Millisecond,
+		ProviderVersion: "test",
+		Client:          openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+		requestTimeout:  2 * time.Second,
+		// Allow the TLS handshake to finish before timing out the stalled response.
+		requestAttemptTimeout: 100 * time.Millisecond,
 		slowRequestThreshold:  2 * time.Second,
 		requestMaxRetries:     &maxRetries,
 		requestObserver: func(observation requestObservation) {
@@ -1123,10 +1124,11 @@ func TestRequestRetriesTimedOutGETResponseBody(t *testing.T) {
 
 	maxRetries := 1
 	client := &APIClient{
-		ProviderVersion:       "test",
-		Client:                openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
-		requestTimeout:        2 * time.Second,
-		requestAttemptTimeout: 10 * time.Millisecond,
+		ProviderVersion: "test",
+		Client:          openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+		requestTimeout:  2 * time.Second,
+		// Allow the TLS handshake to finish before timing out the stalled response.
+		requestAttemptTimeout: 100 * time.Millisecond,
 		slowRequestThreshold:  2 * time.Second,
 		requestMaxRetries:     &maxRetries,
 	}
@@ -1161,7 +1163,7 @@ func TestRequestPreservesRetryAfterWhenGETResponseBodyTimesOut(t *testing.T) {
 		callsMu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		if call == 1 {
-			w.Header().Set("Retry-After-Ms", "75")
+			w.Header().Set("Retry-After-Ms", "750")
 			w.WriteHeader(http.StatusTooManyRequests)
 			if flusher, ok := w.(http.Flusher); ok {
 				flusher.Flush()
@@ -1175,10 +1177,11 @@ func TestRequestPreservesRetryAfterWhenGETResponseBodyTimesOut(t *testing.T) {
 
 	maxRetries := 1
 	client := &APIClient{
-		ProviderVersion:       "test",
-		Client:                openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
-		requestTimeout:        2 * time.Second,
-		requestAttemptTimeout: 10 * time.Millisecond,
+		ProviderVersion: "test",
+		Client:          openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+		requestTimeout:  2 * time.Second,
+		// Allow the TLS handshake to finish before timing out the stalled response.
+		requestAttemptTimeout: 100 * time.Millisecond,
 		slowRequestThreshold:  2 * time.Second,
 		requestMaxRetries:     &maxRetries,
 	}
@@ -1203,7 +1206,7 @@ func TestRequestPreservesRetryAfterWhenGETResponseBodyTimesOut(t *testing.T) {
 
 	callsMu.Lock()
 	defer callsMu.Unlock()
-	if retryDelay := callTimes[1].Sub(callTimes[0]); retryDelay < 70*time.Millisecond {
+	if retryDelay := callTimes[1].Sub(callTimes[0]); retryDelay < 700*time.Millisecond {
 		t.Fatalf("retry did not honor Retry-After-Ms: %s", retryDelay)
 	}
 }
@@ -1256,10 +1259,11 @@ func TestRequestReportsExhaustedGETAttemptTimeouts(t *testing.T) {
 
 	maxRetries := 0
 	client := &APIClient{
-		ProviderVersion:       "test",
-		Client:                openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
-		requestTimeout:        time.Second,
-		requestAttemptTimeout: 10 * time.Millisecond,
+		ProviderVersion: "test",
+		Client:          openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
+		requestTimeout:  time.Second,
+		// Allow the TLS handshake to finish before timing out the stalled response.
+		requestAttemptTimeout: 100 * time.Millisecond,
 		slowRequestThreshold:  time.Second,
 		requestMaxRetries:     &maxRetries,
 	}
