@@ -192,7 +192,7 @@
     "internal/provider/resources/certificate/data_source_certificates_acc_test.go": "b1ee1e80b79b2f38e4d3fb83dcbb239cbb12a21ac243bd54fc6ed4715882c9e4",
     "internal/provider/resources/certificate/resource_certificate.go": "9707fca343e44d7754863e7bc895c7e976118c80369e2357dd7aab54cf5132ef",
     "internal/provider/resources/certificate/resource_certificate_acc_test.go": "ce0c175ba3cfaaab1ace5293958700cfd714ee5a3d59b21c899558d88c9f4419",
-    "internal/provider/resources/external_key/resource_external_key.go": "1f37109b71ba0275a67e6270786567604f213553f5c5a646ef95c82531a8bce0",
+    "internal/provider/resources/external_key/resource_external_key.go": "45f5752b5a9adbb20121f903b8a5292b03e959c38f345ba1a91405a95ddfd3d1",
     "internal/provider/resources/external_key/resource_external_key_protocol_test.go": "32b3ed01f836ded3eaf99e1fb71979fd8c7d484e68f729774576dcecce87241b",
     "internal/provider/resources/group/data_source_group.go": "fef025cee8af01ab7c6e7771234393cbd3f616c35ac3a0a286f501d873538799",
     "internal/provider/resources/group/data_source_group_acc_test.go": "e8b2cf37e03b38182742bc308f7225d493d186fd699f520ba4411b4b9bfe542d",

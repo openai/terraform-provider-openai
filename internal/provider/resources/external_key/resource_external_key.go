@@ -219,6 +219,10 @@ func (r *ExternalKeyResource) Create(ctx context.Context, req resource.CreateReq
 		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
 		return
 	}
+	if err := openaiapi.ApplyStringResponseField(responseData, []string{"id"}, &data.ExternalKeyID, true); err != nil {
+		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
+		return
+	}
 	if data.ExternalKeyID.IsUnknown() {
 		data.ExternalKeyID = types.StringNull()
 	}
@@ -240,78 +244,71 @@ func (r *ExternalKeyResource) Create(ctx context.Context, req resource.CreateReq
 	if data.CreatedAt.IsUnknown() {
 		data.CreatedAt = types.Int64Null()
 	}
-	remoteData := data
-	data.Type = types.StringValue("aws")
-	data.Purpose = types.StringValue("ekm")
-	if err := openaiapi.ApplyStringResponseField(responseData, []string{"id"}, &data.ExternalKeyID, true); err != nil {
-		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-		return
-	}
-	if err := openaiapi.ApplyStringResponseField(responseData, []string{"type"}, &remoteData.Type, true); err != nil {
-		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
+	createdResourceID := data.ExternalKeyID
+	recoverCreatedResource := true
+	defer func() {
+		if !recoverCreatedResource || !resp.Diagnostics.HasError() {
+			return
+		}
+		data.ExternalKeyID = createdResourceID
+		data.Type = types.StringValue("aws")
+		data.Purpose = types.StringValue("ekm")
 		resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
-		return
-	}
-	if err := openaiapi.ApplyStringResponseField(responseData, []string{"purpose"}, &remoteData.Purpose, true); err != nil {
-		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-		resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
-		return
-	}
+	}()
+	_ = responseData
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"name"}, &data.Name, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-		resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 		return
 	}
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"kms_arn"}, &data.KmsArn, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-		resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 		return
 	}
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"role_arn"}, &data.RoleArn, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-		resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 		return
 	}
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"external_id"}, &data.ExternalID, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-		resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+		return
+	}
+	if err := openaiapi.ApplyStringResponseField(responseData, []string{"type"}, &data.Type, true); err != nil {
+		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
+		return
+	}
+	if err := openaiapi.ApplyStringResponseField(responseData, []string{"purpose"}, &data.Purpose, true); err != nil {
+		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
 	}
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"object"}, &data.Object, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-		resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 		return
 	}
 	if err := openaiapi.ApplyStringSetResponseField(responseData, []string{"api_project_ids"}, &data.APIProjectIDs, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-		resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 		return
 	}
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"workspace_id"}, &data.WorkspaceID, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-		resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 		return
 	}
 	if err := openaiapi.ApplyInt64ResponseField(responseData, []string{"created_at"}, &data.CreatedAt, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
-		resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 		return
 	}
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
-	if resp.Diagnostics.HasError() {
+	if data.Purpose.ValueString() != "ekm" {
+		resp.Diagnostics.AddError("Invalid OpenAI API response", fmt.Sprintf("Expected purpose to equal 'ekm' for openai_external_key, got %q.", data.Purpose.ValueString()))
 		return
 	}
-
-	if remoteData.Purpose.ValueString() != "ekm" {
-		resp.Diagnostics.AddError("Invalid OpenAI API response", fmt.Sprintf("Expected purpose to equal 'ekm' for openai_external_key, got %q.", remoteData.Purpose.ValueString()))
-		return
-	}
-	if remoteData.Type.ValueString() != "aws" {
-		resp.Diagnostics.AddError("Invalid OpenAI API response", fmt.Sprintf("Expected type to equal 'aws' for openai_external_key, got %q.", remoteData.Type.ValueString()))
+	if data.Type.ValueString() != "aws" {
+		resp.Diagnostics.AddError("Invalid OpenAI API response", fmt.Sprintf("Expected type to equal 'aws' for openai_external_key, got %q.", data.Type.ValueString()))
 		return
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+	if !resp.Diagnostics.HasError() {
+		recoverCreatedResource = false
+	}
 }
 
 func (r *ExternalKeyResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
