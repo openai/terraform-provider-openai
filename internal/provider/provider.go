@@ -16,6 +16,7 @@ import (
 	"github.com/openai/openai-go/v3/option"
 	openaiapi "github.com/openai/terraform-provider-openai/internal/provider/openaiapi"
 	resourcecertificate "github.com/openai/terraform-provider-openai/internal/provider/resources/certificate"
+	resourceexternalkey "github.com/openai/terraform-provider-openai/internal/provider/resources/external_key"
 	resourcegroup "github.com/openai/terraform-provider-openai/internal/provider/resources/group"
 	resourcegrouprole "github.com/openai/terraform-provider-openai/internal/provider/resources/group_role"
 	resourcegroupuser "github.com/openai/terraform-provider-openai/internal/provider/resources/group_user"
@@ -200,6 +201,7 @@ func (p *OpenAIProvider) Resources(ctx context.Context) []func() resource.Resour
 	return []func() resource.Resource{
 		resourcewebhookendpoint.NewWebhookEndpointResource,
 		resourcemcptunnel.NewMcpTunnelResource,
+		resourceexternalkey.NewExternalKeyResource,
 		resourceinvite.NewInviteResource,
 		resourceorganizationuser.NewOrganizationUserResource,
 		resourceuserrole.NewUserRoleResource,
