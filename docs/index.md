@@ -31,6 +31,23 @@ export OPENAI_ADMIN_KEY="<your-admin-api-key>"
 export OPENAI_API_KEY="<your-project-api-key>"
 ```
 
+Inject credentials through the runtime environment for both planning and applying,
+including separate workers that apply saved plans. Do not use Terraform input
+variables, `TF_VAR_admin_api_key`, `.tfvars` files, or literal provider arguments
+for reusable Admin keys. Terraform's `sensitive` flag hides ordinary display;
+it does not keep ordinary input values out of saved plans.
+
+Explicit provider credential attributes remain supported for compatibility.
+If explicit configuration is necessary, Terraform 1.10 or later supports input
+variables marked with both `sensitive = true` and `ephemeral = true`. Supply
+those values again for each operation and keep their sources out of committed
+configuration and variable files. See [Terraform's sensitive data guidance](https://developer.hashicorp.com/terraform/language/manage-sensitive-data).
+The environment-based example below does not require Terraform 1.10.
+
+Protect the runtime's secret storage and logs separately. Environment delivery
+avoids Terraform input serialization; it does not control how a CI or hosted-run
+platform stores injected secrets, and it does not make resource state non-sensitive.
+
 Credentials are routed only to their matching audience. The provider does not
 inspect a key to infer its audience and never retries an operation with the
 other credential. If a required credential is absent, the affected resource or
@@ -115,31 +132,14 @@ assign the dynamically discovered built-in member role.
 ## Example Usage
 
 ```terraform
-# Prefer environment variables for local use, for example:
+# Supply credentials through the runtime environment for both plan and apply.
+# Keep environment-backed credentials out of Terraform input variables.
 # export OPENAI_ADMIN_KEY=...
 # export OPENAI_API_KEY=...
 # export OPENAI_ORG_ID=...
 # export OPENAI_PROJECT_ID=...
 
-variable "admin_api_key" {
-  type        = string
-  description = "Admin API key used for organization administration requests."
-  sensitive   = true
-  default     = null
-}
-
-variable "api_key" {
-  type        = string
-  description = "Project API key used for project-scoped requests such as webhook management."
-  sensitive   = true
-  default     = null
-}
-
 provider "openai" {
-  # You can omit this argument when OPENAI_ADMIN_KEY is set.
-  admin_api_key = var.admin_api_key
-  # You can omit this argument when OPENAI_API_KEY is set.
-  api_key = var.api_key
   # organization can also be set with OPENAI_ORG_ID.
   # project can also be set with OPENAI_PROJECT_ID.
 }
@@ -150,7 +150,7 @@ provider "openai" {
 
 ### Optional
 
-- `admin_api_key` (String, Sensitive) Admin API key used for organization administration requests.
+- `admin_api_key` (String, Sensitive) Deprecated for configuration: admin API key used for organization administration requests. Omit this attribute and provide OPENAI_ADMIN_KEY in the Terraform process environment for both plan and apply. Terraform may save explicitly configured credentials in a plan, even when marked sensitive. Existing configurations remain supported during migration.
 - `api_key` (String, Sensitive) Project API key used for project-scoped requests such as webhook management.
 - `base_url` (String) Base URL used for OpenAI API requests.
 - `organization` (String) Organization identifier to send with requests.
