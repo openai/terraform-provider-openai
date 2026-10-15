@@ -888,103 +888,106 @@ func TestRequestReportsZeroAttemptsWhenCooldownExhaustsLifecycle(t *testing.T) {
 }
 
 func TestRequestBoundsRetryLifecycleAndRedactsTelemetry(t *testing.T) {
-	var calls atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Retry-After-Ms", "75")
-		w.WriteHeader(http.StatusTooManyRequests)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"error": map[string]any{"message": "retry later", "type": "rate_limit_error"},
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int64
+		transport := retryDelayHTTPClient(func(request *http.Request) (*http.Response, error) {
+			calls.Add(1)
+			// Separate the response and retry timers from the lifecycle deadline.
+			time.Sleep(25 * time.Millisecond)
+			return &http.Response{
+				StatusCode: http.StatusTooManyRequests,
+				Header:     http.Header{"Content-Type": {"application/json"}, "Retry-After-Ms": {"75"}},
+				Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"retry later","type":"rate_limit_error"}}`)),
+				Request:    request,
+			}, nil
 		})
-	}))
-	t.Cleanup(server.Close)
 
-	maxRetries := 2
-	var observationsMu sync.Mutex
-	var observations []requestObservation
-	client := &APIClient{
-		ProviderVersion:      "test",
-		Client:               openai.NewClient(option.WithAPIKey("test"), option.WithBaseURL(server.URL)),
-		requestTimeout:       75 * time.Millisecond,
-		slowRequestThreshold: 10 * time.Millisecond,
-		requestMaxRetries:    &maxRetries,
-		requestObserver: func(observation requestObservation) {
-			observationsMu.Lock()
-			defer observationsMu.Unlock()
-			observations = append(observations, observation)
-		},
-	}
+		maxRetries := 2
+		var observationsMu sync.Mutex
+		var observations []requestObservation
+		client := &APIClient{
+			ProviderVersion:      "test",
+			Client:               openai.NewClient(option.WithAPIKey("test"), option.WithHTTPClient(transport)),
+			requestTimeout:       75 * time.Millisecond,
+			slowRequestThreshold: 10 * time.Millisecond,
+			requestMaxRetries:    &maxRetries,
+			requestObserver: func(observation requestObservation) {
+				observationsMu.Lock()
+				defer observationsMu.Unlock()
+				observations = append(observations, observation)
+			},
+		}
 
-	startedAt := time.Now()
-	_, err := client.Request(
-		context.Background(),
-		http.MethodGet,
-		"/organization/projects/{project_id}/rate_limits",
-		map[string]string{"project_id": "secret-project-id"},
-		map[string]string{"after": "secret-cursor"},
-		nil,
-	)
-	duration := time.Since(startedAt)
-	if err == nil || !strings.Contains(err.Error(), "retry-lifecycle timeout") {
-		t.Fatalf("expected bounded retry-lifecycle timeout, got %v", err)
-	}
-	if !strings.Contains(err.Error(), "GET /organization/projects/{project_id}/rate_limits") ||
-		!strings.Contains(err.Error(), "after 1 attempt(s)") ||
-		!strings.Contains(err.Error(), "last_status_code=429") {
-		t.Fatalf("expected safe terminal request metadata, got %v", err)
-	}
-	if strings.Contains(err.Error(), "secret-project-id") || strings.Contains(err.Error(), "secret-cursor") {
-		t.Fatalf("terminal request metadata contained a concrete path or query value: %v", err)
-	}
-	if duration > time.Second {
-		t.Fatalf("request exceeded its bounded lifecycle: %s", duration)
-	}
-	if calls.Load() != 1 {
-		t.Fatalf("expected timeout during retry backoff before another attempt, got %d calls", calls.Load())
-	}
+		startedAt := time.Now()
+		_, err := client.Request(
+			context.Background(),
+			http.MethodGet,
+			"/organization/projects/{project_id}/rate_limits",
+			map[string]string{"project_id": "secret-project-id"},
+			map[string]string{"after": "secret-cursor"},
+			nil,
+		)
+		duration := time.Since(startedAt)
+		if err == nil || !strings.Contains(err.Error(), "retry-lifecycle timeout") {
+			t.Fatalf("expected bounded retry-lifecycle timeout, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "GET /organization/projects/{project_id}/rate_limits") ||
+			!strings.Contains(err.Error(), "after 1 attempt(s)") ||
+			!strings.Contains(err.Error(), "last_status_code=429") {
+			t.Fatalf("expected safe terminal request metadata, got %v", err)
+		}
+		if strings.Contains(err.Error(), "secret-project-id") || strings.Contains(err.Error(), "secret-cursor") {
+			t.Fatalf("terminal request metadata contained a concrete path or query value: %v", err)
+		}
+		if duration > time.Second {
+			t.Fatalf("request exceeded its bounded lifecycle: %s", duration)
+		}
+		if calls.Load() != 1 {
+			t.Fatalf("expected timeout during retry backoff before another attempt, got %d calls", calls.Load())
+		}
 
-	observationsMu.Lock()
-	defer observationsMu.Unlock()
-	var sawPending bool
-	var sawTimedOutLifecycle bool
-	for _, observation := range observations {
-		if strings.Contains(observation.Path, "secret-project-id") || strings.Contains(observation.Path, "secret-cursor") {
-			t.Fatalf("telemetry contained a concrete path or query value: %#v", observation)
+		observationsMu.Lock()
+		defer observationsMu.Unlock()
+		var sawPending bool
+		var sawTimedOutLifecycle bool
+		for _, observation := range observations {
+			if strings.Contains(observation.Path, "secret-project-id") || strings.Contains(observation.Path, "secret-cursor") {
+				t.Fatalf("telemetry contained a concrete path or query value: %#v", observation)
+			}
+			if observation.Path != "/organization/projects/{project_id}/rate_limits" {
+				t.Fatalf("telemetry did not retain the safe path template: %#v", observation)
+			}
+			sawPending = sawPending || observation.Phase == requestObservationPending
+			sawTimedOutLifecycle = sawTimedOutLifecycle || observation.Phase == requestObservationLifecycle && observation.TimedOut
 		}
-		if observation.Path != "/organization/projects/{project_id}/rate_limits" {
-			t.Fatalf("telemetry did not retain the safe path template: %#v", observation)
+		if !sawPending {
+			t.Fatalf("expected pending retry-lifecycle telemetry, got %#v", observations)
 		}
-		sawPending = sawPending || observation.Phase == requestObservationPending
-		sawTimedOutLifecycle = sawTimedOutLifecycle || observation.Phase == requestObservationLifecycle && observation.TimedOut
-	}
-	if !sawPending {
-		t.Fatalf("expected pending retry-lifecycle telemetry, got %#v", observations)
-	}
-	if !sawTimedOutLifecycle {
-		t.Fatalf("expected timed-out retry-lifecycle telemetry, got %#v", observations)
-	}
-	for _, observation := range observations {
-		switch observation.Phase {
-		case requestObservationPending:
-			if observation.Outcome != requestOutcomePending {
-				t.Fatalf("pending observation has outcome %q: %#v", observation.Outcome, observation)
-			}
-		case requestObservationLifecycle:
-			if observation.Outcome != requestOutcomeDeadline {
-				t.Fatalf("timed-out lifecycle has outcome %q: %#v", observation.Outcome, observation)
-			}
-			if observation.AttemptCount != 1 ||
-				observation.AttemptDuration <= 0 ||
-				observation.NonAttemptDuration <= 0 ||
-				observation.ResponseBytes <= 0 {
-				t.Fatalf("timed-out lifecycle did not separate request and retry-wait timing: %#v", observation)
-			}
-			if message, failed := client.requestObservationErrorMessage(observation); !failed {
-				t.Fatalf("timed-out lifecycle was not classified as an error: %q %#v", message, observation)
+		if !sawTimedOutLifecycle {
+			t.Fatalf("expected timed-out retry-lifecycle telemetry, got %#v", observations)
+		}
+		for _, observation := range observations {
+			switch observation.Phase {
+			case requestObservationPending:
+				if observation.Outcome != requestOutcomePending {
+					t.Fatalf("pending observation has outcome %q: %#v", observation.Outcome, observation)
+				}
+			case requestObservationLifecycle:
+				if observation.Outcome != requestOutcomeDeadline {
+					t.Fatalf("timed-out lifecycle has outcome %q: %#v", observation.Outcome, observation)
+				}
+				if observation.AttemptCount != 1 ||
+					observation.AttemptDuration <= 0 ||
+					observation.NonAttemptDuration <= 0 ||
+					observation.ResponseBytes <= 0 {
+					t.Fatalf("timed-out lifecycle did not separate request and retry-wait timing: %#v", observation)
+				}
+				if message, failed := client.requestObservationErrorMessage(observation); !failed {
+					t.Fatalf("timed-out lifecycle was not classified as an error: %q %#v", message, observation)
+				}
 			}
 		}
-	}
+	})
 }
 
 func TestRequestRecordsUnknownMutationResponseBytes(t *testing.T) {

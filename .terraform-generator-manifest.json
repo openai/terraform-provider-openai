@@ -181,7 +181,7 @@
     "internal/provider/acctest/acceptance.go": "2fe0fa2b9ba52ef5065957fcdc7362980b592dab2915f8cc96a5915323721815",
     "internal/provider/acctest/scenario_acc_test.go": "b2dcbc0e2f1157a394d8b4a6e2f0fe3eaee2e2647e52278df788ef6d7fc9f657",
     "internal/provider/openaiapi/client.go": "99631426484b3c43da3c5db9f117cb39642635de738b9a2ebd5986263185d3f7",
-    "internal/provider/openaiapi/client_test.go": "a38fe50f231c26a45176d6fe4b37e882641ae432baebded79729705c03947a57",
+    "internal/provider/openaiapi/client_test.go": "f75d2ee8dc8e352470cba13e7b521a7574905e9feba508dacc5119fd553213a5",
     "internal/provider/provider.go": "3076a1fd644bc26bebac7ddf32613656c766bc6d1b645893cffa7c29365b86b7",
     "internal/provider/provider_security.go": "c8719bd9078d8c76447cce0d1dd699aaab0d1d8f58964092b5f4aa4e92bc901b",
     "internal/provider/provider_security_test.go": "67febf9c8e64be8976bbfea2942b7ab1a04c877df9ac7e70fec8ceeff3e4872a",
