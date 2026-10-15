@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.0](https://github.com/openai/terraform-provider-openai/compare/v1.3.1...v1.4.0) (2026-10-14)
+
+
+### Features
+
+* add AWS EKM external key resource ([#124](https://github.com/openai/terraform-provider-openai/issues/124)) ([9568ce2](https://github.com/openai/terraform-provider-openai/commit/9568ce21c18806ad72f5714c37547f6e882fbadf))
+* prefer runtime credentials in provider examples ([#128](https://github.com/openai/terraform-provider-openai/issues/128)) ([0cd1dae](https://github.com/openai/terraform-provider-openai/commit/0cd1dae4b84691c41d72620a35a957386e902e21))
+
 ## [1.3.1](https://github.com/openai/terraform-provider-openai/compare/v1.3.0...v1.3.1) (2026-09-25)
 
 

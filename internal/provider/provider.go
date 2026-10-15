@@ -69,7 +69,7 @@ func (p *OpenAIProvider) Schema(ctx context.Context, req provider.SchemaRequest,
 		MarkdownDescription: "Terraform provider for OpenAI API Platform administration and beta project webhook APIs.",
 		Attributes: map[string]schema.Attribute{
 			"admin_api_key": schema.StringAttribute{
-				MarkdownDescription: "Admin API key used for organization administration requests.",
+				MarkdownDescription: "Deprecated for configuration: admin API key used for organization administration requests. Omit this attribute and provide OPENAI_ADMIN_KEY in the Terraform process environment for both plan and apply. Terraform may save explicitly configured credentials in a plan, even when marked sensitive. Existing configurations remain supported during migration.",
 				Required:            false,
 				Optional:            true,
 				Sensitive:           true,

@@ -31,6 +31,23 @@ export OPENAI_ADMIN_KEY="<your-admin-api-key>"
 export OPENAI_API_KEY="<your-project-api-key>"
 ```
 
+Inject credentials through the runtime environment for both planning and applying,
+including separate workers that apply saved plans. Do not use Terraform input
+variables, `TF_VAR_admin_api_key`, `.tfvars` files, or literal provider arguments
+for reusable Admin keys. Terraform's `sensitive` flag hides ordinary display;
+it does not keep ordinary input values out of saved plans.
+
+Explicit provider credential attributes remain supported for compatibility.
+If explicit configuration is necessary, Terraform 1.10 or later supports input
+variables marked with both `sensitive = true` and `ephemeral = true`. Supply
+those values again for each operation and keep their sources out of committed
+configuration and variable files. See [Terraform's sensitive data guidance](https://developer.hashicorp.com/terraform/language/manage-sensitive-data).
+The environment-based example below does not require Terraform 1.10.
+
+Protect the runtime's secret storage and logs separately. Environment delivery
+avoids Terraform input serialization; it does not control how a CI or hosted-run
+platform stores injected secrets, and it does not make resource state non-sensitive.
+
 Credentials are routed only to their matching audience. The provider does not
 inspect a key to infer its audience and never retries an operation with the
 other credential. If a required credential is absent, the affected resource or

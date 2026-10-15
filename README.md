@@ -53,13 +53,23 @@ terraform {
 
 provider "openai" {
   # The provider reads audience-specific credentials from the environment.
-  # You can instead set admin_api_key and/or api_key explicitly.
 }
 
 resource "openai_project" "example" {
   name = "terraform-managed"
 }
 ```
+
+Supply `OPENAI_ADMIN_KEY` to the Terraform process for both `terraform plan`
+and `terraform apply`, including when applying a saved plan on another runner.
+Configure each runner to inject the credential into its process environment.
+
+Explicit `admin_api_key` configuration remains supported, but it is deprecated:
+ordinary Terraform variables, even `sensitive` ones, can be retained in a saved
+plan. To migrate, remove the Admin key variable and provider assignment, and use
+`OPENAI_ADMIN_KEY` for each run. On Terraform 1.10 or later, an ephemeral
+sensitive input is also an option; see [provider configuration](docs/index.md).
+The environment-only example above continues to work with Terraform 1.0.
 
 A webhook-only configuration does not require an Admin API key:
 
