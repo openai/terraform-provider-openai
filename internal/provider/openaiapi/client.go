@@ -962,6 +962,7 @@ func (c *APIClient) requestOptions(ctx context.Context, method string, path stri
 	return []option.RequestOption{
 		option.WithHeader("User-Agent", "terraform-provider-openai/"+version),
 		option.WithMaxRetries(c.effectiveRequestMaxRetries(method)),
+		option.WithMaxRetryDelay(c.effectiveRequestTimeout()),
 		option.WithMiddleware(c.requestTelemetryMiddleware(ctx, method, path, lifecycle)),
 	}
 }

@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"testing/iotest"
+	"testing/synctest"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -891,7 +892,7 @@ func TestRequestBoundsRetryLifecycleAndRedactsTelemetry(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Retry-After", "10")
+		w.Header().Set("Retry-After-Ms", "75")
 		w.WriteHeader(http.StatusTooManyRequests)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"error": map[string]any{"message": "retry later", "type": "rate_limit_error"},
@@ -1562,6 +1563,73 @@ func TestClassifyRequestOutcome(t *testing.T) {
 			if got := classifyRequestOutcome(test.err, test.contextErr, test.statusCode); got != test.want {
 				t.Fatalf("classifyRequestOutcome() = %q, want %q", got, test.want)
 			}
+		})
+	}
+}
+
+type retryDelayHTTPClient func(*http.Request) (*http.Response, error)
+
+func (client retryDelayHTTPClient) Do(request *http.Request) (*http.Response, error) {
+	return client(request)
+}
+
+func TestRequestRetryAfterLifecycleBudget(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		timeout     time.Duration
+		delay       string
+		deadline    time.Duration
+		wantCalls   int
+		wantElapsed time.Duration
+		wantError   bool
+	}{
+		{name: "three minute delay", delay: "180", wantCalls: 2, wantElapsed: 3 * time.Minute},
+		{name: "custom timeout", timeout: 4 * time.Minute, delay: "180", wantCalls: 2, wantElapsed: 3 * time.Minute},
+		{name: "exceeds custom timeout", timeout: time.Minute, delay: "90", wantCalls: 1, wantError: true},
+		{name: "exceeds default timeout", delay: "360", wantCalls: 1, wantError: true},
+		{name: "caller deadline", delay: "180", deadline: 90 * time.Second, wantCalls: 1, wantElapsed: 90 * time.Second, wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				calls := 0
+				transport := retryDelayHTTPClient(func(request *http.Request) (*http.Response, error) {
+					calls++
+					status, body := http.StatusOK, `{"id":"group-test"}`
+					header := http.Header{"Content-Type": {"application/json"}}
+					if calls == 1 {
+						status, body = http.StatusTooManyRequests, `{"error":{"message":"retry later"}}`
+						header.Set("Retry-After", test.delay)
+					}
+					return &http.Response{StatusCode: status, Header: header, Body: io.NopCloser(strings.NewReader(body)), Request: request}, nil
+				})
+				client := &APIClient{
+					Client:         openai.NewClient(option.WithAPIKey("synthetic-key"), option.WithHTTPClient(transport)),
+					requestTimeout: test.timeout,
+				}
+				ctx := context.Background()
+				if test.deadline > 0 {
+					var cancel context.CancelFunc
+					ctx, cancel = context.WithTimeout(ctx, test.deadline)
+					defer cancel()
+				}
+				started := time.Now()
+				response, err := client.Request(ctx, http.MethodGet, "/organization/groups/group-test", nil, nil, nil)
+				if (err != nil) != test.wantError {
+					t.Errorf("Request(Retry-After=%s) error = %v, want error %t", test.delay, err, test.wantError)
+				}
+				if !test.wantError && response["id"] != "group-test" {
+					t.Errorf("Request() id = %v, want group-test", response["id"])
+				}
+				if test.deadline > 0 && !errors.Is(err, context.DeadlineExceeded) {
+					t.Errorf("Request() error = %v, want context deadline exceeded", err)
+				}
+				if calls != test.wantCalls {
+					t.Errorf("Request() attempts = %d, want %d", calls, test.wantCalls)
+				}
+				if elapsed := time.Since(started); elapsed != test.wantElapsed {
+					t.Errorf("Request() elapsed = %s, want %s", elapsed, test.wantElapsed)
+				}
+			})
 		})
 	}
 }
