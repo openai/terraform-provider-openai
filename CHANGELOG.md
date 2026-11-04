@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.0](https://github.com/openai/terraform-provider-openai/compare/v1.4.0...v1.5.0) (2026-11-04)
+
+
+### Features
+
+* add project service tier settings ([#143](https://github.com/openai/terraform-provider-openai/issues/143)) ([c76f176](https://github.com/openai/terraform-provider-openai/commit/c76f176b22d1b790d30a4832ce4b056fe16615c5))
+* add workload identity providers and federation rules ([#145](https://github.com/openai/terraform-provider-openai/issues/145)) ([c4f7cac](https://github.com/openai/terraform-provider-openai/commit/c4f7cacded33526b162451ae7b913890f1c3dd4c))
+
 ## [1.4.0](https://github.com/openai/terraform-provider-openai/compare/v1.3.1...v1.4.0) (2026-10-14)
 
 
