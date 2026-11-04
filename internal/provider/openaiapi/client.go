@@ -10,8 +10,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,6 +23,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -1020,19 +1024,27 @@ func (c *APIClient) request(ctx context.Context, method string, path string, pat
 	}
 
 	var response map[string]any
+	var exactResponse exactNumberResponse
+	var responseTarget any = &response
+	if exact, _ := ctx.Value(exactResponseNumbersKey{}).(bool); exact {
+		responseTarget = &exactResponse
+	}
 	switch method {
 	case http.MethodGet:
-		err = c.Client.Get(requestContext, expandedPath, nil, &response, requestOptions...)
+		err = c.Client.Get(requestContext, expandedPath, nil, responseTarget, requestOptions...)
 	case http.MethodPost:
-		err = c.Client.Post(requestContext, expandedPath, body, &response, requestOptions...)
+		err = c.Client.Post(requestContext, expandedPath, body, responseTarget, requestOptions...)
 	case http.MethodPut:
-		err = c.Client.Put(requestContext, expandedPath, body, &response, requestOptions...)
+		err = c.Client.Put(requestContext, expandedPath, body, responseTarget, requestOptions...)
 	case http.MethodPatch:
-		err = c.Client.Patch(requestContext, expandedPath, body, &response, requestOptions...)
+		err = c.Client.Patch(requestContext, expandedPath, body, responseTarget, requestOptions...)
 	case http.MethodDelete:
-		err = c.Client.Delete(requestContext, expandedPath, nil, &response, requestOptions...)
+		err = c.Client.Delete(requestContext, expandedPath, nil, responseTarget, requestOptions...)
 	default:
 		return nil, fmt.Errorf("unsupported OpenAI API method %q", method)
+	}
+	if responseTarget == &exactResponse {
+		response = map[string]any(exactResponse)
 	}
 	stopPendingTimer()
 	requestDuration := time.Since(requestStartedAt)
@@ -1085,6 +1097,483 @@ func (c *APIClient) request(ctx context.Context, method string, path string, pat
 		response = map[string]any{}
 	}
 	return response, nil
+}
+
+type exactResponseNumbersKey struct{}
+
+// WithExactResponseNumbers preserves JSON number literals for dynamic attributes.
+func WithExactResponseNumbers(ctx context.Context) context.Context {
+	return context.WithValue(ctx, exactResponseNumbersKey{}, true)
+}
+
+type exactNumberResponse map[string]any
+
+func (r *exactNumberResponse) UnmarshalJSON(data []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	return decoder.Decode((*map[string]any)(r))
+}
+
+func StructuredBodyValue(ctx context.Context, value attr.Value, kind string) (any, error) {
+	if err := validateStructuredValue(ctx, value, kind); err != nil {
+		return nil, err
+	}
+	result, err := StructuredRequestValue(ctx, value, nil)
+	if err != nil {
+		return nil, err
+	}
+	if kind == "verification" {
+		object := result.(map[string]any)
+		if object["type"] == "discovery" {
+			if _, exists := object["discovery_url"]; !exists {
+				object["discovery_url"] = nil
+			}
+		}
+	}
+	return result, nil
+}
+
+// StructuredRequestValue keeps scalar types intact and omits absent object fields.
+// keepNull names nullable members that the API requires even when null.
+func StructuredRequestValue(ctx context.Context, value attr.Value, keepNull []string) (any, error) {
+	if value.IsUnknown() {
+		return nil, fmt.Errorf("structured value contains an unknown member")
+	}
+	if value.IsNull() {
+		return nil, nil
+	}
+	switch v := value.(type) {
+	case types.Dynamic:
+		return StructuredRequestValue(ctx, v.UnderlyingValue(), []string{"*"})
+	case types.String:
+		return v.ValueString(), nil
+	case types.Bool:
+		return v.ValueBool(), nil
+	case types.Number:
+		number := v.ValueBigFloat()
+		if err := validateStructuredNumber(number); err != nil {
+			return nil, err
+		}
+		// Keep 64-bit integers in decimal notation, including values above 2^53.
+		// Use compact notation for larger magnitudes and small fractions so
+		// repeated exponent-form values do not retain padded decimal strings.
+		format := byte('g')
+		if number.IsInt() && number.MantExp(nil) <= 64 {
+			format = 'f'
+		}
+		return json.Number(number.Text(format, -1)), nil
+	case types.Int64:
+		return v.ValueInt64(), nil
+	case types.Object:
+		result := map[string]any{}
+		for name, member := range v.Attributes() {
+			retainNull := false
+			for _, nullable := range keepNull {
+				retainNull = retainNull || name == nullable || nullable == "*"
+			}
+			if member.IsNull() && !retainNull {
+				continue
+			}
+			converted, err := StructuredRequestValue(ctx, member, keepNull)
+			if err != nil {
+				return nil, err
+			}
+			result[name] = converted
+		}
+		return result, nil
+	case types.Map:
+		result := map[string]any{}
+		for name, member := range v.Elements() {
+			converted, err := StructuredRequestValue(ctx, member, keepNull)
+			if err != nil {
+				return nil, err
+			}
+			result[name] = converted
+		}
+		return result, nil
+	case types.List:
+		return structuredElements(ctx, v.Elements())
+	case types.Set:
+		return structuredElements(ctx, v.Elements())
+	case types.Tuple:
+		return structuredElements(ctx, v.Elements())
+	default:
+		return nil, fmt.Errorf("unsupported structured value type")
+	}
+}
+
+func structuredElements(ctx context.Context, elements []attr.Value) ([]any, error) {
+	result := make([]any, 0, len(elements))
+	for _, element := range elements {
+		converted, err := StructuredRequestValue(ctx, element, []string{"*"})
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, converted)
+	}
+	return result, nil
+}
+
+// Bound both magnitude and precision before decimal formatting. Precision alone
+// does not bound the decimal expansion of a compact exponent-form number.
+func validateStructuredNumber(number *big.Float) error {
+	if number == nil || number.IsInf() || number.Prec() > 512 {
+		return fmt.Errorf("structured number exceeds supported limits")
+	}
+	exponent := number.MantExp(nil)
+	if exponent < -4096 || exponent > 4096 {
+		return fmt.Errorf("structured number exceeds supported limits")
+	}
+	return nil
+}
+
+func parseStructuredNumber(v json.Number) (*big.Float, error) {
+	literal := string(v)
+	if len(literal) > 4096 {
+		return nil, fmt.Errorf("structured number exceeds supported limits")
+	}
+	if index := strings.IndexAny(literal, "eE"); index >= 0 {
+		exponent, err := strconv.ParseInt(literal[index+1:], 10, 32)
+		if err != nil || exponent < -4096 || exponent > 4096 {
+			return nil, fmt.Errorf("structured number exceeds supported limits")
+		}
+	}
+	number, _, err := big.ParseFloat(literal, 10, 512, big.ToNearestEven)
+	if err != nil {
+		return nil, fmt.Errorf("invalid JSON number")
+	}
+	if err := validateStructuredNumber(number); err != nil {
+		return nil, err
+	}
+	return number, nil
+}
+
+// The protocol encodes large numbers as fixed-point strings. Apply one shared
+// budget before constructing Terraform values, including nested JWKS members.
+// Match the existing response-size cap; account conservatively for MsgPack
+// headers and dynamic type metadata as well as the numeric/string payloads.
+func checkStructuredStateSize(raw any, remaining *int64) error {
+	cost := int64(32)
+	switch value := raw.(type) {
+	case json.Number:
+		number, err := parseStructuredNumber(value)
+		if err != nil {
+			return err
+		}
+		// Numeric bounds above make this temporary conversion bounded too.
+		cost += int64(len(number.Text('f', -1)))
+	case string:
+		cost += int64(len(value))
+	}
+	*remaining -= cost
+	if *remaining < 0 {
+		return fmt.Errorf("structured value exceeds the Terraform state size limit")
+	}
+	switch value := raw.(type) {
+	case map[string]any:
+		for name, member := range value {
+			// Field names occur in both values and JSON-encoded type metadata.
+			*remaining -= int64(len(name)) * 7
+			if err := checkStructuredStateSize(member, remaining); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for _, member := range value {
+			if err := checkStructuredStateSize(member, remaining); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func inferJSONAttribute(ctx context.Context, raw any) (attr.Value, error) {
+	switch v := raw.(type) {
+	case nil:
+		return types.DynamicNull(), nil
+	case string:
+		return types.StringValue(v), nil
+	case bool:
+		return types.BoolValue(v), nil
+	case json.Number:
+		number, err := parseStructuredNumber(v)
+		if err != nil {
+			return nil, err
+		}
+		return types.NumberValue(number), nil
+	case map[string]any:
+		values := map[string]attr.Value{}
+		fieldTypes := map[string]attr.Type{}
+		for name, member := range v {
+			value, err := inferJSONAttribute(ctx, member)
+			if err != nil {
+				return nil, err
+			}
+			values[name], fieldTypes[name] = value, value.Type(ctx)
+		}
+		value, diags := types.ObjectValue(fieldTypes, values)
+		if diags.HasError() {
+			return nil, fmt.Errorf("invalid JSON object")
+		}
+		return value, nil
+	case []any:
+		values := make([]attr.Value, 0, len(v))
+		elementTypes := make([]attr.Type, 0, len(v))
+		for _, member := range v {
+			value, err := inferJSONAttribute(ctx, member)
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value)
+			elementTypes = append(elementTypes, value.Type(ctx))
+		}
+		value, diags := types.TupleValue(elementTypes, values)
+		if diags.HasError() {
+			return nil, fmt.Errorf("invalid JSON array")
+		}
+		return value, nil
+	default:
+		return nil, fmt.Errorf("unsupported JSON value; exact number decoding is required")
+	}
+}
+
+func jsonAttribute(ctx context.Context, raw any, targetType attr.Type) (attr.Value, error) {
+	if raw == nil {
+		return targetType.ValueFromTerraform(ctx, tftypes.NewValue(targetType.TerraformType(ctx), nil))
+	}
+	switch typ := targetType.(type) {
+	case basetypes.DynamicType:
+		value, err := inferJSONAttribute(ctx, raw)
+		if err != nil {
+			return nil, err
+		}
+		return types.DynamicValue(value), nil
+	case types.ListType:
+		items, ok := raw.([]any)
+		if !ok {
+			return nil, fmt.Errorf("expected a JSON array")
+		}
+		values := make([]attr.Value, 0, len(items))
+		for _, item := range items {
+			value, err := jsonAttribute(ctx, item, typ.ElemType)
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value)
+		}
+		value, diags := types.ListValue(typ.ElemType, values)
+		if diags.HasError() {
+			return nil, fmt.Errorf("invalid list response")
+		}
+		return value, nil
+	case types.ObjectType:
+		object, ok := raw.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("expected a JSON object")
+		}
+		values := map[string]attr.Value{}
+		for name, memberType := range typ.AttrTypes {
+			value, err := jsonAttribute(ctx, object[name], memberType)
+			if err != nil {
+				return nil, fmt.Errorf("invalid object member %q", name)
+			}
+			values[name] = value
+		}
+		value, diags := types.ObjectValue(typ.AttrTypes, values)
+		if diags.HasError() {
+			return nil, fmt.Errorf("invalid object response")
+		}
+		return value, nil
+	default:
+		payload, err := json.Marshal(raw)
+		if err != nil {
+			return nil, fmt.Errorf("invalid JSON response value")
+		}
+		tfValue, err := tftypes.ValueFromJSON(payload, targetType.TerraformType(ctx))
+		if err != nil {
+			return nil, fmt.Errorf("response value does not match Terraform type")
+		}
+		return targetType.ValueFromTerraform(ctx, tfValue)
+	}
+}
+
+func structuredResponseValue(ctx context.Context, response map[string]any, paths []string, targetType attr.Type, required bool) (attr.Value, bool, error) {
+	for _, name := range paths {
+		raw, exists := responseValue(response, name)
+		if !exists {
+			continue
+		}
+		if raw == nil && required {
+			return nil, false, missingRequiredResponseFieldError(paths)
+		}
+		remaining := defaultMaxResponseBytes
+		if err := checkStructuredStateSize(raw, &remaining); err != nil {
+			return nil, false, malformedResponseFieldError(name, "a valid structured value")
+		}
+		value, err := jsonAttribute(ctx, raw, targetType)
+		if err != nil {
+			return nil, false, malformedResponseFieldError(name, "a valid structured value")
+		}
+		return value, true, nil
+	}
+	if required {
+		return nil, false, missingRequiredResponseFieldError(paths)
+	}
+	return nil, false, nil
+}
+
+func ApplyObjectResponseField(ctx context.Context, response map[string]any, paths []string, target *types.Object, targetType attr.Type, required bool) error {
+	value, found, err := structuredResponseValue(ctx, response, paths, targetType, required)
+	if err != nil {
+		return err
+	}
+	if found {
+		before, beforeErr := StructuredRequestValue(ctx, *target, nil)
+		after, afterErr := StructuredRequestValue(ctx, value, nil)
+		beforeJSON, _ := json.Marshal(before)
+		afterJSON, _ := json.Marshal(after)
+		if beforeErr == nil && afterErr == nil && bytes.Equal(beforeJSON, afterJSON) {
+			return nil
+		}
+		*target = value.(types.Object)
+	} else if target.IsUnknown() {
+		*target = types.ObjectNull(targetType.(types.ObjectType).AttrTypes)
+	}
+	return nil
+}
+
+func ApplyObjectListResponseField(ctx context.Context, response map[string]any, paths []string, target *types.List, targetType attr.Type, required bool) error {
+	value, found, err := structuredResponseValue(ctx, response, paths, targetType, required)
+	if err != nil {
+		return err
+	}
+	if found {
+		*target = value.(types.List)
+	} else if target.IsUnknown() {
+		*target = types.ListNull(targetType.(types.ListType).ElemType)
+	}
+	return nil
+}
+
+func ApplyDynamicResponseField(ctx context.Context, response map[string]any, paths []string, target *types.Dynamic, targetType attr.Type, required bool) error {
+	value, found, err := structuredResponseValue(ctx, response, paths, targetType, required)
+	if err != nil {
+		return err
+	}
+	if !found {
+		if target.IsUnknown() {
+			*target = types.DynamicNull()
+		}
+		return nil
+	}
+	// Preserve the practitioner's concrete map/list/object type if the response
+	// is identical. This avoids replacing a configured map with an inferred object.
+	if !target.IsNull() && !target.IsUnknown() {
+		before, beforeErr := StructuredRequestValue(ctx, *target, nil)
+		after, afterErr := StructuredRequestValue(ctx, value, nil)
+		beforeJSON, _ := json.Marshal(before)
+		afterJSON, _ := json.Marshal(after)
+		if beforeErr == nil && afterErr == nil && bytes.Equal(beforeJSON, afterJSON) {
+			return nil
+		}
+	}
+	*target = value.(types.Dynamic)
+	return nil
+}
+
+type structuredValidator struct{ kind string }
+
+func (v structuredValidator) Description(context.Context) string {
+	return "Validate the API object shape and scalar types."
+}
+func (v structuredValidator) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+func DynamicValueValidator(kind string) validator.Dynamic { return structuredValidator{kind: kind} }
+func ObjectValueValidator(kind string) validator.Object   { return structuredValidator{kind: kind} }
+
+func validateStructuredValue(ctx context.Context, value attr.Value, kind string) error {
+	if value.IsNull() || value.IsUnknown() {
+		return nil
+	}
+	// Unknown nested values are allowed during planning and checked before the API call.
+	tfValue, err := value.ToTerraformValue(ctx)
+	if err != nil {
+		return fmt.Errorf("invalid structured value")
+	}
+	if !tfValue.IsFullyKnown() {
+		return nil
+	}
+	raw, err := StructuredRequestValue(ctx, value, nil)
+	if err != nil {
+		return err
+	}
+	object, ok := raw.(map[string]any)
+	if !ok {
+		return fmt.Errorf("expected an object")
+	}
+	switch kind {
+	case "scalar_matchers":
+		for _, member := range object {
+			switch member.(type) {
+			case string, bool, json.Number, int64:
+			default:
+				return fmt.Errorf("matcher values must be strings, booleans, or numbers; null and nested values are not allowed")
+			}
+		}
+		// Object conversion omits null members, but null matchers must be rejected.
+		if dynamic, ok := value.(types.Dynamic); ok {
+			switch underlying := dynamic.UnderlyingValue().(type) {
+			case types.Object:
+				if len(object) != len(underlying.Attributes()) {
+					return fmt.Errorf("matcher values cannot be null")
+				}
+			}
+		}
+	case "verification":
+		switch object["type"] {
+		case "discovery":
+			if _, exists := object["jwks"]; exists {
+				return fmt.Errorf("discovery verification cannot include jwks")
+			}
+		case "uploaded_jwks":
+			if _, exists := object["discovery_url"]; exists {
+				return fmt.Errorf("uploaded_jwks verification cannot include discovery_url")
+			}
+			if _, ok := object["jwks"].(map[string]any); !ok {
+				return fmt.Errorf("uploaded_jwks verification requires a jwks object")
+			}
+		default:
+			return fmt.Errorf("verification type must be discovery or uploaded_jwks")
+		}
+	case "permissions":
+		switch object["type"] {
+		case "service_account_default":
+			if _, exists := object["scopes"]; exists {
+				return fmt.Errorf("service_account_default permissions cannot include scopes")
+			}
+		case "restricted":
+			scopes, ok := object["scopes"].([]any)
+			if !ok || len(scopes) == 0 {
+				return fmt.Errorf("restricted permissions require at least one scope")
+			}
+		default:
+			return fmt.Errorf("permissions type must be service_account_default or restricted")
+		}
+	}
+	return nil
+}
+
+func (v structuredValidator) ValidateDynamic(ctx context.Context, req validator.DynamicRequest, resp *validator.DynamicResponse) {
+	if err := validateStructuredValue(ctx, req.ConfigValue, v.kind); err != nil {
+		resp.Diagnostics.AddAttributeError(req.Path, "Invalid object value", err.Error())
+	}
+}
+func (v structuredValidator) ValidateObject(ctx context.Context, req validator.ObjectRequest, resp *validator.ObjectResponse) {
+	if err := validateStructuredValue(ctx, req.ConfigValue, v.kind); err != nil {
+		resp.Diagnostics.AddAttributeError(req.Path, "Invalid object value", err.Error())
+	}
 }
 
 func nextPageCursor(response map[string]any, items []any) string {
@@ -1333,6 +1822,9 @@ func responseInt64(value any) (int64, bool) {
 		return typed, true
 	case int:
 		return int64(typed), true
+	case json.Number:
+		number, err := typed.Int64()
+		return number, err == nil
 	case float64:
 		return int64(typed), true
 	default:

@@ -44,6 +44,8 @@ import (
 	resourcerole "github.com/openai/terraform-provider-openai/internal/provider/resources/role"
 	resourceuserrole "github.com/openai/terraform-provider-openai/internal/provider/resources/user_role"
 	resourcewebhookendpoint "github.com/openai/terraform-provider-openai/internal/provider/resources/webhook_endpoint"
+	resourceworkloadidentityfederationrule "github.com/openai/terraform-provider-openai/internal/provider/resources/workload_identity_federation_rule"
+	resourceworkloadidentityprovider "github.com/openai/terraform-provider-openai/internal/provider/resources/workload_identity_provider"
 )
 
 var _ provider.Provider = &OpenAIProvider{}
@@ -200,6 +202,8 @@ func (p *OpenAIProvider) Configure(ctx context.Context, req provider.ConfigureRe
 
 func (p *OpenAIProvider) Resources(ctx context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
+		resourceworkloadidentityprovider.NewWorkloadIdentityProviderResource,
+		resourceworkloadidentityfederationrule.NewWorkloadIdentityFederationRuleResource,
 		resourcewebhookendpoint.NewWebhookEndpointResource,
 		resourcemcptunnel.NewMcpTunnelResource,
 		resourceexternalkey.NewExternalKeyResource,
@@ -233,6 +237,10 @@ func (p *OpenAIProvider) Resources(ctx context.Context) []func() resource.Resour
 
 func (p *OpenAIProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
+		resourceworkloadidentityprovider.NewWorkloadIdentityProviderDataSource,
+		resourceworkloadidentityprovider.NewWorkloadIdentityProvidersDataSource,
+		resourceworkloadidentityfederationrule.NewWorkloadIdentityFederationRuleDataSource,
+		resourceworkloadidentityfederationrule.NewWorkloadIdentityFederationRulesDataSource,
 		resourceprojectservicetiersettings.NewProjectServiceTierSettingsDataSource,
 		resourcewebhookendpoint.NewWebhookEndpointDataSource,
 		resourcewebhookendpoint.NewWebhookEndpointsDataSource,
