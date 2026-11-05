@@ -9,6 +9,7 @@ require (
 	github.com/hashicorp/terraform-plugin-testing v1.16.0
 	github.com/openai/openai-go/v3 v3.73.0
 	golang.org/x/net v0.62.0
+	google.golang.org/grpc v1.83.2
 )
 
 require (
@@ -63,6 +64,5 @@ require (
 	golang.org/x/tools v0.51.0 // indirect
 	google.golang.org/appengine v1.6.8 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
-	google.golang.org/grpc v1.83.2 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
