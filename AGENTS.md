@@ -1,74 +1,19 @@
 # Agent instructions
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and
-[RELEASING.md](RELEASING.md) before changing this repository.
+Before changes, read and follow [CONTRIBUTING.md](CONTRIBUTING.md),
+[SECURITY.md](SECURITY.md), and [RELEASING.md](RELEASING.md).
 
 ## Generated code and repository ownership
 
-- The provider manages OpenAI Administration API resources with privileged
-  organization credentials and beta project webhook resources with project
-  credentials. Treat authentication, authorization, Terraform state, and
-  published provider artifacts as security-sensitive boundaries.
-- Check `.terraform-generator-manifest.json` before editing provider sources,
-  generated tests, Terraform examples, or `docs/`. Files listed in the manifest
-  and files marked `Code generated ... DO NOT EDIT` are generator-owned; change
-  their authoritative upstream source when available instead of introducing an
-  uncoordinated manual patch. `make generate` regenerates provider documentation,
-  not the upstream provider implementation.
-- Preserve the existing `@openai/sdks-team` ownership and obtain appropriate
-  security-focused review for changes affecting the boundaries below.
+- Follow [file ownership and upstream generation](CONTRIBUTING.md#development-and-file-ownership): check `.terraform-generator-manifest.json` and generated headers before editing provider sources, tests, examples, or docs. Fix generator-owned files upstream, not through uncoordinated manual patches. `make generate` refreshes documentation, not provider implementation.
+- Preserve `@openai/sdks-team` ownership. Administration API resources use privileged organization credentials; beta project webhooks use project credentials. Authentication, authorization, Terraform state, and published artifacts are security boundaries.
 
 ## Security requirements
 
-- Never commit, print, or upload real admin or API keys, bearer tokens, GitHub
-  App private keys, GPG keys, signing passphrases, `.env` files, customer data,
-  Terraform state, saved plans, or sensitive `.tfvars` files. Read the provider's
-  organization-admin credential from `OPENAI_ADMIN_KEY` and its project-webhook
-  credential from `OPENAI_API_KEY`; the audiences are not substitutes for one
-  another. Do not place a live key in Terraform configuration or examples.
-- Use clearly fake credentials, synthetic organization/project/user data,
-  `t.Setenv`, and `httptest` or local mocks in ordinary tests and fixtures.
-  Acceptance tests require an explicit `TF_ACC=1`, the audience-specific
-  `OPENAI_ADMIN_KEY` and/or `OPENAI_API_KEY`, and applicable
-  `OPENAI_TF_ACC_*` values. They can mutate real organizations, users, roles,
-  projects, certificates, retention settings, spend controls, and webhook
-  endpoints. Never enable them automatically or run them without an authorized
-  isolated account or project.
-- Redact `Authorization` and other credential-bearing headers, cookies, signed
-  URLs, private key material, customer identifiers, email addresses, and
-  sensitive request or response bodies from diagnostics, fixtures, Terraform
-  logs, crash reports, traces, and CI artifacts. Treat `TF_LOG`,
-  `TF_LOG_PROVIDER_OPENAI_CLIENT`, saved plans, and `*.tfstate` as sensitive;
-  Terraform's `Sensitive: true` or `sensitive = true` hides normal display but
-  does not guarantee that a value is absent from state or plan files.
-- Review direct and transitive dependencies, provenance, versions, and `replace`
-  directives in both `go.mod`/`go.sum` and `tools/go.mod`/`tools/go.sum`.
-  Preserve Go module checksum verification; inspect generator/install scripts,
-  GoReleaser hooks, Syft downloads, Terraform binaries, provider sources, and
-  any `.terraform.lock.hcl` before accepting or executing supply-chain changes.
-- Pin third-party GitHub Actions to reviewed full commit SHAs. Keep workflow
-  permissions and GitHub App tokens least-privileged; preserve
-  `permissions: {}` where present, isolate write-capable tokens and secrets from
-  untrusted pull-request code, and keep release-only access in the existing
-  protected `release` and `publish` environments.
-- Protect `OPENAI_SDKS_APP_PRIVATE_KEY`, `GPG_PRIVATE_KEY`, `PASSPHRASE`, and
-  publishing tokens. Preserve the reviewed tag-triggered GoReleaser workflow,
-  protected signing credentials, OS/architecture provider archives,
-  per-archive SPDX SBOMs, signed SHA-256 checksums covering those SBOMs, the
-  Terraform Registry manifest, and mandatory pre-publication SBOM verification.
-- Obtain security-focused `@openai/sdks-team` review and add targeted offline
-  regression tests for changes to admin authentication; `base_url`, redirects,
-  proxies, TLS, or credential forwarding; path/import-ID validation;
-  organization/project authorization, role grants, or service accounts;
-  Terraform schema sensitivity, state, plans, or diagnostics; certificates,
-  data retention, spend controls, retries, caching, or pagination; and
-  dependency, generation, CI, signing, or release behavior. Preserve
-  `create_service_account_only=true`: service-account resources must not create
-  API keys, grant roles implicitly, or persist credentials in Terraform state.
-- Report suspected vulnerabilities in the provider or its release artifacts
-  privately to `disclosure@openai.com` as described in
-  [SECURITY.md](SECURITY.md), including the affected version/artifact and
-  sanitized reproduction details.
-  Do not report security vulnerabilities through public GitHub issues, pull
-  requests, or discussions. Do not include live credentials, API keys, customer
-  data, or unredacted sensitive logs.
+- Follow [credential, state, and example rules](CONTRIBUTING.md#credentials-terraform-state-and-safe-examples). Never commit, print, or upload real credentials/signing material, `.env`, customer data, state, saved plans, or sensitive `.tfvars`. Redact sensitive diagnostics, logs, crash reports, traces, and artifacts; Terraform sensitivity flags do not remove data from state/plans.
+- Use `OPENAI_ADMIN_KEY` for organization administration and `OPENAI_API_KEY` for project webhooks; never substitute them or embed live keys in configuration/examples. Ordinary tests use fake credentials, synthetic data, `t.Setenv`, and `httptest`/local mocks.
+- Follow [security-sensitive review and offline testing](CONTRIBUTING.md#security-sensitive-changes-and-testing), including focused SDK-team review and targeted offline regressions for every listed boundary. Acceptance tests require explicit `TF_ACC=1`, audience-specific credentials, applicable `OPENAI_TF_ACC_*` fixtures, and an authorized isolated account/project; never enable automatically. They mutate real resources.
+- Preserve `create_service_account_only=true`: service-account resources must not create API keys, grant roles implicitly, or persist credentials in state.
+- Follow [dependency/supply-chain review](CONTRIBUTING.md#dependency-and-supply-chain-review) for both provider and tools modules, scripts, downloads, and lockfiles. Preserve checksum verification, reviewed full-SHA Actions, least-privilege tokens, existing `permissions: {}`, and isolation from untrusted PR code.
+- Preserve protected `release`/`publish` environments and the [signing/artifact requirements](CONTRIBUTING.md#release-signing-and-published-artifacts), including per-archive SPDX SBOMs, signed SHA-256 coverage, Registry manifest, and pre-publication verification. Follow RELEASING.md for the tag-triggered publication workflow.
+- Report vulnerabilities privately to `disclosure@openai.com` per [SECURITY.md](SECURITY.md), with affected version/artifact and sanitized reproduction; never disclose through public issues, PRs, or discussions.
