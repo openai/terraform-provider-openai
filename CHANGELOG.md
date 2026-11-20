@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/openai/terraform-provider-openai/compare/v1.5.0...v1.6.0) (2026-11-20)
+
+
+### Features
+
+* add hard spend limit email settings ([#164](https://github.com/openai/terraform-provider-openai/issues/164)) ([b6736ae](https://github.com/openai/terraform-provider-openai/commit/b6736aef9ff1e59343c8b3e35237d7c3d627f1f8))
+
 ## [1.5.0](https://github.com/openai/terraform-provider-openai/compare/v1.4.0...v1.5.0) (2026-11-04)
 
 
