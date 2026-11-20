@@ -6,12 +6,12 @@ import (
 	"context"
 	"fmt"
 
-	openaiapi "github.com/openai/terraform-provider-openai/internal/provider/openaiapi"
-
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	openaiapi "github.com/openai/terraform-provider-openai/internal/provider/openaiapi"
 )
 
 var _ datasource.DataSource = &ProjectSpendLimitDataSource{}
@@ -22,14 +22,29 @@ type ProjectSpendLimitDataSource struct {
 }
 
 type ProjectSpendLimitDataSourceModel struct {
-	ProjectID         types.String `tfsdk:"project_id"`
-	Object            types.String `tfsdk:"object"`
-	ThresholdAmount   types.Int64  `tfsdk:"threshold_amount"`
-	Currency          types.String `tfsdk:"currency"`
-	Interval          types.String `tfsdk:"interval"`
-	EnforcementStatus types.String `tfsdk:"enforcement_status"`
-	ID                types.String `tfsdk:"id"`
-	ResponseJSON      types.String `tfsdk:"response_json"`
+	ProjectID           types.String `tfsdk:"project_id"`
+	Object              types.String `tfsdk:"object"`
+	ThresholdAmount     types.Int64  `tfsdk:"threshold_amount"`
+	Currency            types.String `tfsdk:"currency"`
+	Interval            types.String `tfsdk:"interval"`
+	EnforcementStatus   types.String `tfsdk:"enforcement_status"`
+	NotificationChannel types.Object `tfsdk:"notification_channel"`
+	ID                  types.String `tfsdk:"id"`
+	ResponseJSON        types.String `tfsdk:"response_json"`
+}
+
+type ProjectSpendLimitDataSourceNotificationChannelModel struct {
+	Type          types.String `tfsdk:"type"`
+	Recipients    types.List   `tfsdk:"recipients"`
+	SubjectPrefix types.String `tfsdk:"subject_prefix"`
+}
+
+func (ProjectSpendLimitDataSourceNotificationChannelModel) AttributeTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"type":           types.StringType,
+		"recipients":     types.ListType{ElemType: types.StringType},
+		"subject_prefix": types.StringType,
+	}
 }
 
 func NewProjectSpendLimitDataSource() datasource.DataSource {
@@ -89,6 +104,37 @@ func (d *ProjectSpendLimitDataSource) Schema(ctx context.Context, req datasource
 				Optional:            false,
 				Computed:            true,
 				Sensitive:           false,
+			},
+			"notification_channel": schema.SingleNestedAttribute{
+				MarkdownDescription: "Additional email settings for this hard spend limit.",
+				Required:            false,
+				Optional:            false,
+				Computed:            true,
+				Sensitive:           false,
+				Attributes: map[string]schema.Attribute{
+					"type": schema.StringAttribute{
+						MarkdownDescription: "type",
+						Required:            false,
+						Optional:            false,
+						Computed:            true,
+						Sensitive:           false,
+					},
+					"recipients": schema.ListAttribute{
+						MarkdownDescription: "recipients",
+						ElementType:         types.StringType,
+						Required:            false,
+						Optional:            false,
+						Computed:            true,
+						Sensitive:           false,
+					},
+					"subject_prefix": schema.StringAttribute{
+						MarkdownDescription: "Email subject prefix, or an empty string when unset.",
+						Required:            false,
+						Optional:            false,
+						Computed:            true,
+						Sensitive:           false,
+					},
+				},
 			},
 			"id": schema.StringAttribute{
 				MarkdownDescription: "Synthetic data source identifier.",
@@ -165,6 +211,10 @@ func (d *ProjectSpendLimitDataSource) Read(ctx context.Context, req datasource.R
 		return
 	}
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"enforcement.status"}, &data.EnforcementStatus, false); err != nil {
+		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
+		return
+	}
+	if err := openaiapi.ApplyObjectResponseField(ctx, responseData, []string{"notification_channel"}, &data.NotificationChannel, types.ObjectType{AttrTypes: ProjectSpendLimitDataSourceNotificationChannelModel{}.AttributeTypes()}, false, "subject_prefix"); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
 	}

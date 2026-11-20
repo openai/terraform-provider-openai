@@ -29,6 +29,16 @@ data "openai_organization_spend_limit" "example" {
 - `enforcement_status` (String) enforcement status
 - `id` (String) Synthetic data source identifier.
 - `interval` (String) interval
+- `notification_channel` (Attributes) Additional email settings for this hard spend limit. (see [below for nested schema](#nestedatt--notification_channel))
 - `object` (String) object
 - `response_json` (String) Raw JSON response returned by the OpenAI API.
 - `threshold_amount` (Number) Hard spend limit amount, in cents.
+
+<a id="nestedatt--notification_channel"></a>
+### Nested Schema for `notification_channel`
+
+Read-Only:
+
+- `recipients` (List of String) recipients
+- `subject_prefix` (String) Email subject prefix, or an empty string when unset.
+- `type` (String) type

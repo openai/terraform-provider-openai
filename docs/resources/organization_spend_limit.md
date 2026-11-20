@@ -32,11 +32,24 @@ resource "openai_organization_spend_limit" "example" {
 - `interval` (String) interval
 - `threshold_amount` (Number) Hard spend limit amount, in cents.
 
+### Optional
+
+- `notification_channel` (Attributes) Additional email settings for this hard spend limit. Omit the object or an individual setting to preserve the saved value. Use an empty recipients list to clear extra recipients or an empty subject prefix to clear the prefix. (see [below for nested schema](#nestedatt--notification_channel))
+
 ### Read-Only
 
 - `enforcement_status` (String) enforcement status
 - `object` (String) object
 - `singleton_id` (String) singleton id
+
+<a id="nestedatt--notification_channel"></a>
+### Nested Schema for `notification_channel`
+
+Optional:
+
+- `recipients` (List of String) Additional email recipients. Use an empty list to clear them.
+- `subject_prefix` (String) Email subject prefix. Use an empty string to clear it.
+- `type` (String) type
 
 ## Import
 

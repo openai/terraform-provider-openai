@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -26,12 +28,27 @@ type OrganizationSpendLimitResource struct {
 }
 
 type OrganizationSpendLimitResourceModel struct {
-	SingletonID       types.String `tfsdk:"singleton_id"`
-	Object            types.String `tfsdk:"object"`
-	ThresholdAmount   types.Int64  `tfsdk:"threshold_amount"`
-	Currency          types.String `tfsdk:"currency"`
-	Interval          types.String `tfsdk:"interval"`
-	EnforcementStatus types.String `tfsdk:"enforcement_status"`
+	SingletonID         types.String `tfsdk:"singleton_id"`
+	Object              types.String `tfsdk:"object"`
+	ThresholdAmount     types.Int64  `tfsdk:"threshold_amount"`
+	Currency            types.String `tfsdk:"currency"`
+	Interval            types.String `tfsdk:"interval"`
+	EnforcementStatus   types.String `tfsdk:"enforcement_status"`
+	NotificationChannel types.Object `tfsdk:"notification_channel"`
+}
+
+type OrganizationSpendLimitNotificationChannelModel struct {
+	Type          types.String `tfsdk:"type"`
+	Recipients    types.List   `tfsdk:"recipients"`
+	SubjectPrefix types.String `tfsdk:"subject_prefix"`
+}
+
+func (OrganizationSpendLimitNotificationChannelModel) AttributeTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"type":           types.StringType,
+		"recipients":     types.ListType{ElemType: types.StringType},
+		"subject_prefix": types.StringType,
+	}
 }
 
 func NewOrganizationSpendLimitResource() resource.Resource {
@@ -103,6 +120,40 @@ func (r *OrganizationSpendLimitResource) Schema(ctx context.Context, req resourc
 				Computed:            true,
 				Sensitive:           false,
 			},
+			"notification_channel": schema.SingleNestedAttribute{
+				MarkdownDescription: "Additional email settings for this hard spend limit. Omit the object or an individual setting to preserve the saved value. Use an empty recipients list to clear extra recipients or an empty subject prefix to clear the prefix.",
+				Required:            false,
+				Optional:            true,
+				Computed:            true,
+				Sensitive:           false,
+				Attributes: map[string]schema.Attribute{
+					"type": schema.StringAttribute{
+						MarkdownDescription: "type",
+						Required:            false,
+						Optional:            true,
+						Computed:            true,
+						Sensitive:           false,
+						Validators: []validator.String{
+							openaiapi.StringOneOf("email"),
+						},
+					},
+					"recipients": schema.ListAttribute{
+						MarkdownDescription: "Additional email recipients. Use an empty list to clear them.",
+						ElementType:         types.StringType,
+						Required:            false,
+						Optional:            true,
+						Computed:            true,
+						Sensitive:           false,
+					},
+					"subject_prefix": schema.StringAttribute{
+						MarkdownDescription: "Email subject prefix. Use an empty string to clear it.",
+						Required:            false,
+						Optional:            true,
+						Computed:            true,
+						Sensitive:           false,
+					},
+				},
+			},
 		},
 	}
 }
@@ -133,6 +184,11 @@ func (r *OrganizationSpendLimitResource) Create(ctx context.Context, req resourc
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	var configData OrganizationSpendLimitResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &configData)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	if r.client == nil {
 		resp.Diagnostics.AddError("Missing OpenAI API client", "The provider was not configured before this operation ran.")
 		return
@@ -143,6 +199,15 @@ func (r *OrganizationSpendLimitResource) Create(ctx context.Context, req resourc
 	openaiapi.AddInt64BodyField(body, "threshold_amount", data.ThresholdAmount)
 	openaiapi.AddStringBodyField(body, "currency", data.Currency)
 	openaiapi.AddStringBodyField(body, "interval", data.Interval)
+	if !configData.NotificationChannel.IsNull() && !configData.NotificationChannel.IsUnknown() {
+		value, err := openaiapi.StructuredBodyValue(ctx, configData.NotificationChannel, "")
+		if err != nil {
+			resp.Diagnostics.AddError("Invalid structured value", err.Error())
+			return
+		}
+		openaiapi.SetBodyField(body, []string{"notification_channel"}, value)
+		openaiapi.SetBodyField(body, append([]string{"notification_channel"}, "type"), "email")
+	}
 	responseData, err := r.client.Request(ctx, "POST", "/organization/spend_limit", pathParams, queryParams, body)
 	if err != nil {
 		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
@@ -165,6 +230,10 @@ func (r *OrganizationSpendLimitResource) Create(ctx context.Context, req resourc
 		return
 	}
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"enforcement.status"}, &data.EnforcementStatus, false); err != nil {
+		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
+		return
+	}
+	if err := openaiapi.ApplyObjectResponseField(ctx, responseData, []string{"notification_channel"}, &data.NotificationChannel, types.ObjectType{AttrTypes: OrganizationSpendLimitNotificationChannelModel{}.AttributeTypes()}, false, "subject_prefix"); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
 	}
@@ -213,6 +282,10 @@ func (r *OrganizationSpendLimitResource) Read(ctx context.Context, req resource.
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
 	}
+	if err := openaiapi.ApplyObjectResponseField(ctx, responseData, []string{"notification_channel"}, &data.NotificationChannel, types.ObjectType{AttrTypes: OrganizationSpendLimitNotificationChannelModel{}.AttributeTypes()}, false, "subject_prefix"); err != nil {
+		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
+		return
+	}
 	data.SingletonID = types.StringValue("organization")
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -224,6 +297,11 @@ func (r *OrganizationSpendLimitResource) Update(ctx context.Context, req resourc
 		return
 	}
 
+	var configData OrganizationSpendLimitResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &configData)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	if r.client == nil {
 		resp.Diagnostics.AddError("Missing OpenAI API client", "The provider was not configured before this operation ran.")
 		return
@@ -234,6 +312,15 @@ func (r *OrganizationSpendLimitResource) Update(ctx context.Context, req resourc
 	openaiapi.AddInt64BodyField(body, "threshold_amount", data.ThresholdAmount)
 	openaiapi.AddStringBodyField(body, "currency", data.Currency)
 	openaiapi.AddStringBodyField(body, "interval", data.Interval)
+	if !configData.NotificationChannel.IsNull() && !configData.NotificationChannel.IsUnknown() {
+		value, err := openaiapi.StructuredBodyValue(ctx, configData.NotificationChannel, "")
+		if err != nil {
+			resp.Diagnostics.AddError("Invalid structured value", err.Error())
+			return
+		}
+		openaiapi.SetBodyField(body, []string{"notification_channel"}, value)
+		openaiapi.SetBodyField(body, append([]string{"notification_channel"}, "type"), "email")
+	}
 	responseData, err := r.client.Request(ctx, "POST", "/organization/spend_limit", pathParams, queryParams, body)
 	if err != nil {
 		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
@@ -256,6 +343,10 @@ func (r *OrganizationSpendLimitResource) Update(ctx context.Context, req resourc
 		return
 	}
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"enforcement.status"}, &data.EnforcementStatus, false); err != nil {
+		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
+		return
+	}
+	if err := openaiapi.ApplyObjectResponseField(ctx, responseData, []string{"notification_channel"}, &data.NotificationChannel, types.ObjectType{AttrTypes: OrganizationSpendLimitNotificationChannelModel{}.AttributeTypes()}, false, "subject_prefix"); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
 	}
