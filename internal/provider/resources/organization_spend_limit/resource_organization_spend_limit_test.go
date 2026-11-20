@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"regexp"
 	"sync"
 	"testing"
@@ -24,6 +25,8 @@ type spendLimitServerState struct {
 	mu             sync.Mutex
 	threshold      int64
 	status         string
+	recipients     []string
+	subjectPrefix  string
 	postBodies     []map[string]any
 	getCalls       int
 	deleteCalls    int
@@ -33,11 +36,13 @@ type spendLimitServerState struct {
 func newSpendLimitServer(t *testing.T) (*httptest.Server, *spendLimitServerState) {
 	t.Helper()
 	state := &spendLimitServerState{
-		t:         t,
-		path:      "/organization/spend_limit",
-		object:    "organization.spend_limit",
-		threshold: 10000,
-		status:    "inactive",
+		t:             t,
+		path:          "/organization/spend_limit",
+		object:        "organization.spend_limit",
+		threshold:     10000,
+		status:        "inactive",
+		recipients:    []string{"existing@example.com"},
+		subjectPrefix: "Existing",
 	}
 	server := httptest.NewServer(http.HandlerFunc(state.handle))
 	t.Cleanup(server.Close)
@@ -62,9 +67,20 @@ func (s *spendLimitServerState) handle(w http.ResponseWriter, req *http.Request)
 			return
 		}
 		threshold, ok := body["threshold_amount"].(float64)
-		if !ok || body["currency"] != "USD" || body["interval"] != "month" || len(body) != 3 {
+		notification, hasNotification := body["notification_channel"]
+		wantFields := 3
+		if hasNotification {
+			wantFields++
+		}
+		if !ok || body["currency"] != "USD" || body["interval"] != "month" || len(body) != wantFields {
 			http.Error(w, fmt.Sprintf("unexpected body: %#v", body), http.StatusBadRequest)
 			return
+		}
+		if hasNotification {
+			if err := s.updateNotification(notification); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 		}
 		s.threshold = int64(threshold)
 		if len(s.postBodies) > 0 {
@@ -85,7 +101,45 @@ func (s *spendLimitServerState) handle(w http.ResponseWriter, req *http.Request)
 	}
 }
 
+func (s *spendLimitServerState) updateNotification(value any) error {
+	if value == nil {
+		s.recipients = []string{}
+		s.subjectPrefix = ""
+		return nil
+	}
+	channel, ok := value.(map[string]any)
+	if !ok || channel["type"] != "email" {
+		return fmt.Errorf("invalid notification channel: %#v", value)
+	}
+	if value, present := channel["recipients"]; present {
+		recipients, ok := value.([]any)
+		if !ok {
+			return fmt.Errorf("expected a notification recipients list: %#v", value)
+		}
+		s.recipients = make([]string, 0, len(recipients))
+		for _, item := range recipients {
+			recipient, ok := item.(string)
+			if !ok {
+				return fmt.Errorf("expected a notification recipient string: %#v", item)
+			}
+			s.recipients = append(s.recipients, recipient)
+		}
+	}
+	if value, present := channel["subject_prefix"]; present {
+		prefix, ok := value.(string)
+		if !ok && value != nil {
+			return fmt.Errorf("expected a notification subject prefix string or null: %#v", value)
+		}
+		s.subjectPrefix = prefix
+	}
+	return nil
+}
+
 func (s *spendLimitServerState) writeResponse(w http.ResponseWriter) {
+	var subjectPrefix any
+	if s.subjectPrefix != "" {
+		subjectPrefix = s.subjectPrefix
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"object":           s.object,
@@ -94,6 +148,11 @@ func (s *spendLimitServerState) writeResponse(w http.ResponseWriter) {
 		"interval":         "month",
 		"enforcement": map[string]any{
 			"status": s.status,
+		},
+		"notification_channel": map[string]any{
+			"type":           "email",
+			"recipients":     s.recipients,
+			"subject_prefix": subjectPrefix,
 		},
 	})
 }
@@ -105,6 +164,10 @@ func spendLimitProviderFactories() map[string]func() (tfprotov6.ProviderServer, 
 }
 
 func spendLimitConfig(baseURL string, threshold int64) string {
+	return spendLimitConfigWithNotification(baseURL, threshold, "")
+}
+
+func spendLimitConfigWithNotification(baseURL string, threshold int64, notification string) string {
 	return fmt.Sprintf(`
 provider "openai" {
   admin_api_key = "test"
@@ -115,12 +178,12 @@ resource "openai_organization_spend_limit" "test" {
   threshold_amount = %d
   currency         = "USD"
   interval         = "month"
-}
+%s}
 
 data "openai_organization_spend_limit" "lookup" {
   depends_on = [openai_organization_spend_limit.test]
 }
-`, baseURL+"/v1", threshold)
+`, baseURL+"/v1", threshold, notification)
 }
 
 func TestSpendLimitProtocolLifecycleAndDataSource(t *testing.T) {
@@ -171,11 +234,110 @@ func TestSpendLimitProtocolLifecycleAndDataSource(t *testing.T) {
 	if state.postBodies[1]["threshold_amount"] != float64(20000) {
 		t.Fatalf("unexpected update body: %#v", state.postBodies[1])
 	}
+	for _, body := range state.postBodies {
+		if _, present := body["notification_channel"]; present {
+			t.Fatalf("legacy configuration wrote notification settings: %#v", body)
+		}
+	}
 	if state.getCalls == 0 {
 		t.Fatal("expected resource and data-source reads")
 	}
 	if state.deleteCalls == 0 {
 		t.Fatal("expected delete request")
+	}
+}
+
+func TestSpendLimitProtocolNotifications(t *testing.T) {
+	server, state := newSpendLimitServer(t)
+
+	checkNotification := func(recipients, subjectPrefix string) resource.TestCheckFunc {
+		checks := make([]resource.TestCheckFunc, 0, 8)
+		for _, address := range []string{"openai_organization_spend_limit.test", "data.openai_organization_spend_limit.lookup"} {
+			checks = append(checks,
+				resource.TestCheckResourceAttr(address, "notification_channel.type", "email"),
+				resource.TestCheckResourceAttr(address, "notification_channel.subject_prefix", subjectPrefix),
+			)
+			if recipients == "" {
+				checks = append(checks, resource.TestCheckResourceAttr(address, "notification_channel.recipients.#", "0"))
+			} else {
+				checks = append(checks,
+					resource.TestCheckResourceAttr(address, "notification_channel.recipients.#", "1"),
+					resource.TestCheckResourceAttr(address, "notification_channel.recipients.0", recipients),
+				)
+			}
+		}
+		return resource.ComposeTestCheckFunc(checks...)
+	}
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: spendLimitProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: spendLimitConfigWithNotification(server.URL, 10000, `
+  notification_channel = {
+    recipients = [terraform_data.recipient.output]
+    subject_prefix = "Ops"
+  }
+`) + `
+resource "terraform_data" "recipient" {
+  input = "alerts@example.com"
+}
+`,
+				Check: checkNotification("alerts@example.com", "Ops"),
+			},
+			{
+				Config: spendLimitConfig(server.URL, 20000),
+				Check:  checkNotification("alerts@example.com", "Ops"),
+			},
+			{
+				ResourceName:                         "openai_organization_spend_limit.test",
+				ImportState:                          true,
+				ImportStateId:                        "organization",
+				ImportStateVerify:                    true,
+				ImportStateVerifyIdentifierAttribute: "singleton_id",
+			},
+			{
+				Config: spendLimitConfigWithNotification(server.URL, 20000, `
+  notification_channel = {
+    type = "email"
+    recipients = []
+  }
+`),
+				Check: checkNotification("", "Ops"),
+			},
+			{
+				Config: spendLimitConfigWithNotification(server.URL, 20000, `
+  notification_channel = {
+    type = "email"
+    recipients = []
+    subject_prefix = ""
+  }
+`),
+				Check: checkNotification("", ""),
+			},
+		},
+	})
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	wantChannels := []map[string]any{
+		{"type": "email", "recipients": []any{"alerts@example.com"}, "subject_prefix": "Ops"},
+		nil,
+		{"type": "email", "recipients": []any{}},
+		{"type": "email", "recipients": []any{}, "subject_prefix": ""},
+	}
+	if len(state.postBodies) != len(wantChannels) {
+		t.Fatalf("unexpected POST bodies: %#v", state.postBodies)
+	}
+	for i, want := range wantChannels {
+		got, present := state.postBodies[i]["notification_channel"]
+		if want == nil {
+			if present {
+				t.Errorf("POST %d should omit notification_channel, got %#v", i+1, got)
+			}
+		} else if !reflect.DeepEqual(got, want) {
+			t.Errorf("POST %d notification_channel = %#v, want %#v", i+1, got, want)
+		}
 	}
 }
 

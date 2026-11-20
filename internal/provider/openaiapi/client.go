@@ -1423,20 +1423,38 @@ func structuredResponseValue(ctx context.Context, response map[string]any, paths
 	return nil, false, nil
 }
 
-func ApplyObjectResponseField(ctx context.Context, response map[string]any, paths []string, target *types.Object, targetType attr.Type, required bool) error {
+func ApplyObjectResponseField(ctx context.Context, response map[string]any, paths []string, target *types.Object, targetType attr.Type, required bool, emptyStringFields ...string) error {
 	value, found, err := structuredResponseValue(ctx, response, paths, targetType, required)
 	if err != nil {
 		return err
 	}
 	if found {
+		object := value.(types.Object)
+		if len(emptyStringFields) > 0 && !object.IsNull() {
+			members := object.Attributes()
+			for _, name := range emptyStringFields {
+				member, ok := members[name].(types.String)
+				if !ok {
+					return fmt.Errorf("expected a string object member for %q", name)
+				}
+				if member.IsNull() {
+					members[name] = types.StringValue("")
+				}
+			}
+			normalized, diags := types.ObjectValue(object.AttributeTypes(ctx), members)
+			if diags.HasError() {
+				return fmt.Errorf("could not normalize string object members")
+			}
+			object = normalized
+		}
 		before, beforeErr := StructuredRequestValue(ctx, *target, nil)
-		after, afterErr := StructuredRequestValue(ctx, value, nil)
+		after, afterErr := StructuredRequestValue(ctx, object, nil)
 		beforeJSON, _ := json.Marshal(before)
 		afterJSON, _ := json.Marshal(after)
 		if beforeErr == nil && afterErr == nil && bytes.Equal(beforeJSON, afterJSON) {
 			return nil
 		}
-		*target = value.(types.Object)
+		*target = object
 	} else if target.IsUnknown() {
 		*target = types.ObjectNull(targetType.(types.ObjectType).AttrTypes)
 	}
