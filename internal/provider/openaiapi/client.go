@@ -1888,7 +1888,24 @@ func workspaceWIFProviderScope(provider map[string]any, params map[string]string
 	return nil
 }
 
+// WorkspaceWIFHasBinding reports whether the provider has its required Codex binding.
+func WorkspaceWIFHasBinding(provider map[string]any, workspaceID string) (bool, error) {
+	binding, err := findWorkspaceWIFBinding(provider, workspaceID)
+	return binding != nil, err
+}
+
 func workspaceWIFBinding(provider map[string]any, workspaceID string) (map[string]any, error) {
+	binding, err := findWorkspaceWIFBinding(provider, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if binding == nil {
+		return nil, fmt.Errorf("workspace provider did not return its Codex binding")
+	}
+	return binding, nil
+}
+
+func findWorkspaceWIFBinding(provider map[string]any, workspaceID string) (map[string]any, error) {
 	bindings, ok := provider["product_bindings"].([]any)
 	if !ok {
 		return nil, fmt.Errorf("workspace provider did not contain a product_bindings array")
@@ -1908,7 +1925,7 @@ func workspaceWIFBinding(provider map[string]any, workspaceID string) (map[strin
 		selected = binding
 	}
 	if selected == nil {
-		return nil, fmt.Errorf("workspace provider did not return its Codex binding")
+		return nil, nil
 	}
 	if _, err := workspaceWIFID(selected, "id"); err != nil {
 		return nil, err

@@ -545,6 +545,69 @@ func TestWorkspaceWIFIncompleteCreateCanBeDeletedWhileBindingFails(t *testing.T)
 	}
 }
 
+func TestWorkspaceWIFReplacesProviderWithMissingBinding(t *testing.T) {
+	f := newWorkspaceWIFFixture()
+	s := f.server(t)
+	config := workspaceWIFConfig(s.URL) + `
+resource "openai_workspace_workload_identity_provider" "test" {
+  workspace_id = "workspace_synthetic"
+  name = "CI"
+  issuer = "https://issuer.example.com"
+  verification = { type = "discovery" }
+}
+`
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: workspaceWIFFactories(),
+		Steps: []resource.TestStep{
+			{Config: config},
+			{Config: config, PlanOnly: true, ExpectNonEmptyPlan: true, PreConfig: func() {
+				f.mu.Lock()
+				defer f.mu.Unlock()
+				f.bound = false
+			}},
+			{Config: config},
+			{Config: config, PlanOnly: true},
+		},
+	})
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, operation := range []string{"POST " + workspaceWIFCollection, "POST " + workspaceWIFProviderPath + "/bindings", "DELETE " + workspaceWIFProviderPath} {
+		if count := f.writes[operation]; count != 2 {
+			t.Errorf("expected initial create, replacement, and final cleanup; %s ran %d times", operation, count)
+		}
+	}
+}
+
+func TestWorkspaceWIFPlansReplacementForMissingBinding(t *testing.T) {
+	for _, bound := range []bool{false, true} {
+		t.Run(fmt.Sprintf("bound_%t", bound), func(t *testing.T) {
+			f := newWorkspaceWIFFixture()
+			f.seed()
+			f.bound = bound
+			s := f.server(t)
+			server, schemas := workspaceWIFProtocol(t, s.URL)
+			state := workspaceWIFImported(t, server, workspaceWIFProviderType)
+			typ := schemas.ResourceSchemas[workspaceWIFProviderType].ValueType()
+			config := workspaceWIFValue(t, typ, map[string]any{"workspace_id": workspaceWIFID, "name": "CI", "issuer": "https://issuer.example.com"})
+			planned, err := server.PlanResourceChange(context.Background(), &tfprotov6.PlanResourceChangeRequest{
+				TypeName: workspaceWIFProviderType, PriorState: state, Config: config, ProposedNewState: state,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			workspaceWIFNoErrors(t, planned.Diagnostics)
+			if replace := len(planned.RequiresReplace) > 0; replace == bound {
+				t.Fatalf("bound=%t: replacement=%t", bound, replace)
+			}
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if len(f.writes) != 0 {
+				t.Fatalf("planning changed the API: %v", f.writes)
+			}
+		})
+	}
+}
+
 func TestWorkspaceWIFReadErrorsAndDeleteOwnership(t *testing.T) {
 	for _, typeName := range []string{workspaceWIFProviderType, workspaceWIFRuleType} {
 		t.Run(typeName, func(t *testing.T) {

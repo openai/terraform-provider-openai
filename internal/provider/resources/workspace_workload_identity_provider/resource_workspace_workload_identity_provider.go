@@ -80,13 +80,47 @@ func NewWorkspaceWorkloadIdentityProviderResource() resource.Resource {
 	return &WorkspaceWorkloadIdentityProviderResource{}
 }
 
+var _ resource.ResourceWithModifyPlan = &WorkspaceWorkloadIdentityProviderResource{}
+
+func (r *WorkspaceWorkloadIdentityProviderResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
+	var data WorkspaceWorkloadIdentityProviderResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if r.client == nil {
+		resp.Diagnostics.AddError("Missing OpenAI API client", "The provider was not configured before this operation ran.")
+		return
+	}
+
+	response, err := r.client.WorkspaceWIFRequest(ctx, "provider", "GET", "/workspaces/{workspace_id}/workload-identity/providers/{provider_id}",
+		map[string]string{"workspace_id": data.WorkspaceID.ValueString(), "provider_id": data.ID.ValueString()}, nil, nil)
+	if err != nil {
+		resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
+		return
+	}
+	bound, err := openaiapi.WorkspaceWIFHasBinding(response, data.WorkspaceID.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
+		return
+	}
+	if !bound {
+		// Keep the old identity in state for Delete, but plan a new complete provider.
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("id"), types.StringUnknown())...)
+		resp.RequiresReplace.Append(path.Root("id"))
+	}
+}
+
 func (r *WorkspaceWorkloadIdentityProviderResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = "openai_workspace_workload_identity_provider"
 }
 
 func (r *WorkspaceWorkloadIdentityProviderResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Beta. Manage a workload identity provider owned by a ChatGPT workspace for Codex. Requires a workspace admin personal access token with chatgpt.workspace.workload_identity.write. Shared tenant providers are managed with tenant resources.\n\nAuthentication: Set the workspace_admin_api_key provider attribute or OPENAI_WORKSPACE_ADMIN_KEY environment variable for the workspace API audience; with a custom workspace_base_url, set the workspace_admin_api_key provider attribute explicitly.",
+		MarkdownDescription: "Beta. Manage a workload identity provider owned by a ChatGPT workspace for Codex. Requires a workspace admin personal access token with chatgpt.workspace.workload_identity.write. Shared tenant providers are managed with tenant resources. If its Codex binding is missing, Terraform plans to replace the provider.\n\nAuthentication: Set the workspace_admin_api_key provider attribute or OPENAI_WORKSPACE_ADMIN_KEY environment variable for the workspace API audience; with a custom workspace_base_url, set the workspace_admin_api_key provider attribute explicitly.",
 		Attributes: map[string]schema.Attribute{
 			"workspace_id": schema.StringAttribute{
 				MarkdownDescription: "ID of the owning ChatGPT workspace.",

@@ -3,13 +3,13 @@
 page_title: "openai_workspace_workload_identity_provider Resource - openai"
 subcategory: ""
 description: |-
-  Beta. Manage a workload identity provider owned by a ChatGPT workspace for Codex. Requires a workspace admin personal access token with chatgpt.workspace.workload_identity.write. Shared tenant providers are managed with tenant resources.
+  Beta. Manage a workload identity provider owned by a ChatGPT workspace for Codex. Requires a workspace admin personal access token with chatgpt.workspace.workload_identity.write. Shared tenant providers are managed with tenant resources. If its Codex binding is missing, Terraform plans to replace the provider.
   Authentication: Set the workspace_admin_api_key provider attribute or OPENAI_WORKSPACE_ADMIN_KEY environment variable for the workspace API audience; with a custom workspace_base_url, set the workspace_admin_api_key provider attribute explicitly.
 ---
 
 # openai_workspace_workload_identity_provider (Resource)
 
-Beta. Manage a workload identity provider owned by a ChatGPT workspace for Codex. Requires a workspace admin personal access token with chatgpt.workspace.workload_identity.write. Shared tenant providers are managed with tenant resources.
+Beta. Manage a workload identity provider owned by a ChatGPT workspace for Codex. Requires a workspace admin personal access token with chatgpt.workspace.workload_identity.write. Shared tenant providers are managed with tenant resources. If its Codex binding is missing, Terraform plans to replace the provider.
 
 Authentication: Set the workspace_admin_api_key provider attribute or OPENAI_WORKSPACE_ADMIN_KEY environment variable for the workspace API audience; with a custom workspace_base_url, set the workspace_admin_api_key provider attribute explicitly.
 
