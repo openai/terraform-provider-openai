@@ -1804,9 +1804,23 @@ func (c *APIClient) WorkspaceWIFRequest(ctx context.Context, kind, method, path 
 	if err := workspaceWIFProviderScope(provider, providerParams); err != nil {
 		return nil, err
 	}
-	binding, err := workspaceWIFBinding(provider, params["workspace_id"])
+	owned := provider["owner_type"] == "chatgpt_workspace" && provider["owner_id"] == params["workspace_id"]
+	if method != http.MethodGet && !owned {
+		return nil, fmt.Errorf("the workload identity provider is managed by its owner; use tenant resources for shared configuration")
+	}
+	binding, err := findWorkspaceWIFBinding(provider, params["workspace_id"])
 	if err != nil {
 		return nil, err
+	}
+	if binding == nil {
+		if owned && kind == "rule" && (method == http.MethodGet || method == http.MethodDelete) {
+			return nil, &openai.Error{
+				StatusCode: http.StatusBadRequest,
+				Code:       "workload_identity_binding_not_found",
+				Message:    "workspace provider did not return its Codex binding",
+			}
+		}
+		return nil, fmt.Errorf("workspace provider did not return its Codex binding")
 	}
 	if kind == "rules" {
 		mappings, ok := binding["mappings"].([]any)
@@ -1826,9 +1840,6 @@ func (c *APIClient) WorkspaceWIFRequest(ctx context.Context, kind, method, path 
 			items = append(items, mapping)
 		}
 		return map[string]any{"items": items}, nil
-	}
-	if method != http.MethodGet && (provider["owner_type"] != "chatgpt_workspace" || provider["owner_id"] != params["workspace_id"]) {
-		return nil, fmt.Errorf("the workload identity provider is managed by its owner; use tenant resources for shared configuration")
 	}
 	resolved := copyQueryParams(params)
 	resolved["binding_id"], err = workspaceWIFID(binding, "id")
@@ -1892,17 +1903,6 @@ func workspaceWIFProviderScope(provider map[string]any, params map[string]string
 func WorkspaceWIFHasBinding(provider map[string]any, workspaceID string) (bool, error) {
 	binding, err := findWorkspaceWIFBinding(provider, workspaceID)
 	return binding != nil, err
-}
-
-func workspaceWIFBinding(provider map[string]any, workspaceID string) (map[string]any, error) {
-	binding, err := findWorkspaceWIFBinding(provider, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	if binding == nil {
-		return nil, fmt.Errorf("workspace provider did not return its Codex binding")
-	}
-	return binding, nil
 }
 
 func findWorkspaceWIFBinding(provider map[string]any, workspaceID string) (map[string]any, error) {

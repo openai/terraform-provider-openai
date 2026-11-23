@@ -554,6 +554,12 @@ resource "openai_workspace_workload_identity_provider" "test" {
   name = "CI"
   issuer = "https://issuer.example.com"
 }
+resource "openai_workspace_workload_identity_federation_rule" "test" {
+  workspace_id = "workspace_synthetic"
+  workload_identity_provider_id = openai_workspace_workload_identity_provider.test.id
+  principal_id = "principal_synthetic"
+  external_subject = "ci:release"
+}
 `
 	updatedConfig := strings.Replace(config, `name = "CI"`, `name = "updated CI"`, 1)
 	resource.UnitTest(t, resource.TestCase{
@@ -575,7 +581,10 @@ resource "openai_workspace_workload_identity_provider" "test" {
 	if count := f.writes["PATCH "+workspaceWIFProviderPath]; count != 1 {
 		t.Fatalf("expected one provider update, got %d", count)
 	}
-	for _, operation := range []string{"POST " + workspaceWIFCollection, "POST " + workspaceWIFProviderPath + "/bindings", "DELETE " + workspaceWIFProviderPath} {
+	if count := f.writes["DELETE "+workspaceWIFRulePath]; count != 1 {
+		t.Fatalf("expected only the replacement rule to need deletion, got %d deletes", count)
+	}
+	for _, operation := range []string{"POST " + workspaceWIFCollection, "POST " + workspaceWIFProviderPath + "/bindings", "POST " + workspaceWIFRulesPath, "DELETE " + workspaceWIFProviderPath} {
 		if count := f.writes[operation]; count != 2 {
 			t.Errorf("expected initial create, replacement, and final cleanup; %s ran %d times", operation, count)
 		}
@@ -607,6 +616,59 @@ func TestWorkspaceWIFPlansReplacementForMissingBinding(t *testing.T) {
 			defer f.mu.Unlock()
 			if len(f.writes) != 0 {
 				t.Fatalf("planning changed the API: %v", f.writes)
+			}
+		})
+	}
+}
+
+func TestWorkspaceWIFMissingBindingRuleCleanup(t *testing.T) {
+	for _, foreignOwner := range []bool{false, true} {
+		t.Run(fmt.Sprintf("foreign_owner_%t", foreignOwner), func(t *testing.T) {
+			f := newWorkspaceWIFFixture()
+			f.seed()
+			s := f.server(t)
+			server, schemas := workspaceWIFProtocol(t, s.URL)
+			state := workspaceWIFImported(t, server, workspaceWIFRuleType)
+			typ := schemas.ResourceSchemas[workspaceWIFRuleType].ValueType()
+			f.mu.Lock()
+			f.bound = false
+			if foreignOwner {
+				f.provider["owner_type"], f.provider["owner_id"] = "tenant", "tenant_synthetic"
+			}
+			f.mu.Unlock()
+			read, err := server.ReadResource(context.Background(), &tfprotov6.ReadResourceRequest{TypeName: workspaceWIFRuleType, CurrentState: state})
+			if err != nil {
+				t.Fatal(err)
+			}
+			value, err := read.NewState.Unmarshal(typ)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if value.IsNull() == foreignOwner || workspaceWIFHasError(read.Diagnostics) != foreignOwner {
+				t.Fatalf("incorrect missing-binding read: %v", read.Diagnostics)
+			}
+			// Delete the original state without relying on the refresh above.
+			null := workspaceWIFValue(t, typ, nil)
+			destroyed, err := server.ApplyResourceChange(context.Background(), &tfprotov6.ApplyResourceChangeRequest{TypeName: workspaceWIFRuleType, PriorState: state, PlannedState: null, Config: null})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if workspaceWIFHasError(destroyed.Diagnostics) != foreignOwner {
+				t.Fatalf("incorrect missing-binding delete: %v", destroyed.Diagnostics)
+			}
+			if !foreignOwner {
+				value, err := destroyed.NewState.Unmarshal(typ)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !value.IsNull() {
+					t.Fatal("deleted rule remained in state")
+				}
+			}
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if len(f.writes) != 0 {
+				t.Fatalf("missing-binding cleanup performed a write: %v", f.writes)
 			}
 		})
 	}
