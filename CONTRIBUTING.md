@@ -73,14 +73,16 @@ implementation.
 
 ### Credentials, Terraform state, and safe examples
 
-- Never commit real OpenAI Admin API keys, project API keys, access tokens, GitHub App private
+- Never commit real OpenAI Admin API keys, project API keys, workspace or tenant
+  admin credentials, access tokens, GitHub App private
   keys, GPG private keys, signing passphrases, `.env` files, customer data,
   Terraform state, saved plans, or sensitive `.tfvars` files. Supply the
   provider's organization-administration credential through `OPENAI_ADMIN_KEY`
   and its project-webhook credential through `OPENAI_API_KEY`; never use a live
   key in `.tf` files, examples, fixtures, command arguments, or shell history.
-  The two credentials are audience-specific and are not substitutes for one
-  another.
+  Workspace and tenant WIF use `OPENAI_WORKSPACE_ADMIN_KEY` and
+  `OPENAI_TENANT_ADMIN_KEY`, respectively. Every credential is audience-specific;
+  none is a substitute for another.
 - Use clearly fake credentials, synthetic organization/project/user data, and
   local `httptest` servers or mocks in unit tests, examples, and recorded
   responses. Keep ordinary unit tests offline and free of real credentials.
@@ -145,6 +147,7 @@ identifiers, and every acceptance fixture while preserving unrelated settings:
 ```sh
 offline_go_test() (
   unset TF_ACC OPENAI_ADMIN_KEY OPENAI_API_KEY \
+    OPENAI_WORKSPACE_ADMIN_KEY OPENAI_TENANT_ADMIN_KEY \
     OPENAI_ORG_ID OPENAI_ORGANIZATION OPENAI_ORGANIZATION_ID \
     OPENAI_PROJECT OPENAI_PROJECT_ID || exit 1
 
@@ -168,13 +171,13 @@ terraform fmt -check -recursive examples
 ```
 
 Acceptance tests are explicitly opt-in and require `TF_ACC=1`, the
-audience-specific `OPENAI_ADMIN_KEY` and/or `OPENAI_API_KEY`, and applicable
-`OPENAI_TF_ACC_*` fixture variables. They can create, modify, or delete real
-organization resources and project webhook endpoints, and may affect access,
-retention, spending, or outbound event delivery. Run `make testacc` or its
-narrower targets only against an authorized isolated organization or project
-with approved credentials; never enable acceptance tests automatically in
-pull-request workflows.
+audience-specific credentials, and applicable `OPENAI_TF_ACC_*` fixture
+variables. They can create, modify, or delete real organization resources and
+project webhook endpoints, and may affect access, retention, spending, or
+outbound event delivery. WIF lifecycle validation also creates and changes
+trust settings and federation rules. Use authorized isolated organizations,
+projects, workspaces, or tenants, and clean up the resources created by the
+test. Never enable acceptance tests automatically in pull-request workflows.
 
 ## Reporting vulnerabilities
 

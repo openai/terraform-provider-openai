@@ -43,6 +43,10 @@ func configureProviderWithAttributeValues(t *testing.T, baseURL string, explicit
 	t.Helper()
 	t.Setenv("OPENAI_ADMIN_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("OPENAI_WORKSPACE_ADMIN_KEY", "")
+	t.Setenv("OPENAI_TENANT_ADMIN_KEY", "")
+	t.Setenv("OPENAI_ORG_ID", "")
+	t.Setenv("OPENAI_PROJECT_ID", "")
 	for name, value := range environmentValues {
 		t.Setenv(name, value)
 	}
@@ -62,7 +66,11 @@ func configureProviderWithAttributeValues(t *testing.T, baseURL string, explicit
 		attributeValues[name] = value
 	}
 	if explicit {
-		attributeValues["base_url"] = tftypes.NewValue(tftypes.String, baseURL)
+		for _, name := range []string{"base_url", "workspace_base_url", "tenant_base_url"} {
+			if _, overridden := attributeOverrides[name]; !overridden {
+				attributeValues[name] = tftypes.NewValue(tftypes.String, baseURL)
+			}
+		}
 	}
 
 	request := provider.ConfigureRequest{
@@ -327,6 +335,16 @@ func TestProviderRejectsUnknownCredentialsWithoutEnvironmentFallback(t *testing.
 			field:               "api_key",
 			environmentVariable: "OPENAI_API_KEY",
 		},
+		{
+			name:                "workspace_admin_api_key",
+			field:               "workspace_admin_api_key",
+			environmentVariable: "OPENAI_WORKSPACE_ADMIN_KEY",
+		},
+		{
+			name:                "tenant_admin_api_key",
+			field:               "tenant_admin_api_key",
+			environmentVariable: "OPENAI_TENANT_ADMIN_KEY",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -359,7 +377,7 @@ func TestProviderBindsAmbientProjectCredentialToDefaultOpenAIOrigin(t *testing.T
 		{name: "default OpenAI origin", wantAudience: true},
 		{name: "canonical default OpenAI origin", baseURL: "https://API.OPENAI.COM:443/v1", explicit: true, wantAudience: true},
 		{name: "custom HTTPS origin", baseURL: "https://proxy.example.com/v1", explicit: true},
-		{name: "default host alternate port", baseURL: "https://api.openai.com:8443/v1", explicit: true},
+		{name: "default host alternate port", baseURL: "https://API.OPENAI.COM:8443/v1", explicit: true},
 		{name: "loopback origin", baseURL: "http://127.0.0.1:8080/v1", explicit: true},
 	}
 	for _, test := range tests {
@@ -432,6 +450,172 @@ func TestProviderTreatsBlankAmbientProjectCredentialAsMissing(t *testing.T) {
 	}
 }
 
+func TestProviderBindsAmbientWorkspaceCredentialToDefaultOpenAIOrigin(t *testing.T) {
+	tests := []struct {
+		name         string
+		baseURL      string
+		explicit     bool
+		wantAudience bool
+	}{
+		{name: "default OpenAI origin", wantAudience: true},
+		{name: "canonical default OpenAI origin", baseURL: "https://API.CHATGPT.COM:443/v1", explicit: true, wantAudience: true},
+		{name: "custom HTTPS origin", baseURL: "https://proxy.example.com/v1", explicit: true},
+		{name: "default host alternate port", baseURL: "https://API.CHATGPT.COM:8443/v1", explicit: true},
+		{name: "loopback origin", baseURL: "http://127.0.0.1:8080/v1", explicit: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := configureProviderWithAttributeValues(
+				t,
+				test.baseURL,
+				test.explicit,
+				map[string]tftypes.Value{
+					"admin_api_key": tftypes.NewValue(tftypes.String, "synthetic-support-credential"),
+				},
+				map[string]string{"OPENAI_WORKSPACE_ADMIN_KEY": "synthetic-ambient-credential"},
+			)
+			if response.Diagnostics.HasError() {
+				t.Fatalf("provider configuration failed: %v", response.Diagnostics)
+			}
+			providerData, ok := response.ResourceData.(*openaiapi.ProviderData)
+			if !ok {
+				t.Fatalf("provider data has unexpected type %T", response.ResourceData)
+			}
+			if _, ok := providerData.Client("admin"); !ok {
+				t.Fatal("custom-origin configuration lost its explicitly configured support audience")
+			}
+			_, gotAudience := providerData.Client("workspace")
+			if gotAudience != test.wantAudience {
+				t.Fatalf("ambient credential audience available = %t, want %t", gotAudience, test.wantAudience)
+			}
+		})
+	}
+}
+
+func TestProviderRejectsAmbientWorkspaceCredentialAtCustomOriginWithoutAnotherAudience(t *testing.T) {
+	response := configureProviderWithAttributeValues(
+		t,
+		"https://proxy.example.com/v1",
+		true,
+		nil,
+		map[string]string{"OPENAI_WORKSPACE_ADMIN_KEY": "synthetic-ambient-credential"},
+	)
+	if !response.Diagnostics.HasError() {
+		t.Fatal("provider configuration unexpectedly accepted an ambient credential at a custom origin")
+	}
+	if response.ResourceData != nil || response.DataSourceData != nil {
+		t.Fatal("rejected ambient credential received provider data")
+	}
+	if !strings.Contains(fmt.Sprint(response.Diagnostics), "Ambient OpenAI credential requires default origin") {
+		t.Fatalf("unexpected configuration diagnostic: %v", response.Diagnostics)
+	}
+}
+
+func TestProviderTreatsBlankAmbientWorkspaceCredentialAsMissing(t *testing.T) {
+	for _, value := range []string{"", "   "} {
+		response := configureProviderWithAttributeValues(
+			t,
+			"https://proxy.example.com/v1",
+			true,
+			nil,
+			map[string]string{"OPENAI_WORKSPACE_ADMIN_KEY": value},
+		)
+		if !response.Diagnostics.HasError() {
+			t.Fatal("provider configuration unexpectedly accepted a blank ambient credential")
+		}
+		diagnostics := fmt.Sprint(response.Diagnostics)
+		if !strings.Contains(diagnostics, "Missing OpenAI API key") {
+			t.Fatalf("blank ambient credential diagnostic = %v, want missing credential", response.Diagnostics)
+		}
+		if strings.Contains(diagnostics, "Ambient OpenAI credential requires default origin") {
+			t.Fatalf("blank ambient credential was incorrectly treated as origin-bound: %v", response.Diagnostics)
+		}
+	}
+}
+
+func TestProviderBindsAmbientTenantCredentialToDefaultOpenAIOrigin(t *testing.T) {
+	tests := []struct {
+		name         string
+		baseURL      string
+		explicit     bool
+		wantAudience bool
+	}{
+		{name: "default OpenAI origin", wantAudience: true},
+		{name: "canonical default OpenAI origin", baseURL: "https://API.OPENAI.COM:443/v1", explicit: true, wantAudience: true},
+		{name: "custom HTTPS origin", baseURL: "https://proxy.example.com/v1", explicit: true},
+		{name: "default host alternate port", baseURL: "https://API.OPENAI.COM:8443/v1", explicit: true},
+		{name: "loopback origin", baseURL: "http://127.0.0.1:8080/v1", explicit: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := configureProviderWithAttributeValues(
+				t,
+				test.baseURL,
+				test.explicit,
+				map[string]tftypes.Value{
+					"admin_api_key": tftypes.NewValue(tftypes.String, "synthetic-support-credential"),
+				},
+				map[string]string{"OPENAI_TENANT_ADMIN_KEY": "synthetic-ambient-credential"},
+			)
+			if response.Diagnostics.HasError() {
+				t.Fatalf("provider configuration failed: %v", response.Diagnostics)
+			}
+			providerData, ok := response.ResourceData.(*openaiapi.ProviderData)
+			if !ok {
+				t.Fatalf("provider data has unexpected type %T", response.ResourceData)
+			}
+			if _, ok := providerData.Client("admin"); !ok {
+				t.Fatal("custom-origin configuration lost its explicitly configured support audience")
+			}
+			_, gotAudience := providerData.Client("tenant")
+			if gotAudience != test.wantAudience {
+				t.Fatalf("ambient credential audience available = %t, want %t", gotAudience, test.wantAudience)
+			}
+		})
+	}
+}
+
+func TestProviderRejectsAmbientTenantCredentialAtCustomOriginWithoutAnotherAudience(t *testing.T) {
+	response := configureProviderWithAttributeValues(
+		t,
+		"https://proxy.example.com/v1",
+		true,
+		nil,
+		map[string]string{"OPENAI_TENANT_ADMIN_KEY": "synthetic-ambient-credential"},
+	)
+	if !response.Diagnostics.HasError() {
+		t.Fatal("provider configuration unexpectedly accepted an ambient credential at a custom origin")
+	}
+	if response.ResourceData != nil || response.DataSourceData != nil {
+		t.Fatal("rejected ambient credential received provider data")
+	}
+	if !strings.Contains(fmt.Sprint(response.Diagnostics), "Ambient OpenAI credential requires default origin") {
+		t.Fatalf("unexpected configuration diagnostic: %v", response.Diagnostics)
+	}
+}
+
+func TestProviderTreatsBlankAmbientTenantCredentialAsMissing(t *testing.T) {
+	for _, value := range []string{"", "   "} {
+		response := configureProviderWithAttributeValues(
+			t,
+			"https://proxy.example.com/v1",
+			true,
+			nil,
+			map[string]string{"OPENAI_TENANT_ADMIN_KEY": value},
+		)
+		if !response.Diagnostics.HasError() {
+			t.Fatal("provider configuration unexpectedly accepted a blank ambient credential")
+		}
+		diagnostics := fmt.Sprint(response.Diagnostics)
+		if !strings.Contains(diagnostics, "Missing OpenAI API key") {
+			t.Fatalf("blank ambient credential diagnostic = %v, want missing credential", response.Diagnostics)
+		}
+		if strings.Contains(diagnostics, "Ambient OpenAI credential requires default origin") {
+			t.Fatalf("blank ambient credential was incorrectly treated as origin-bound: %v", response.Diagnostics)
+		}
+	}
+}
+
 func TestProviderRoutesCredentialsByAudience(t *testing.T) {
 	receivedAuthorization := map[string]string{}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -442,8 +626,10 @@ func TestProviderRoutesCredentialsByAudience(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	response := configureProviderWithCredentialValues(t, server.URL, true, map[string]string{
-		"admin_api_key": "synthetic-1-credential",
-		"api_key":       "synthetic-2-credential",
+		"admin_api_key":           "synthetic-1-credential",
+		"api_key":                 "synthetic-2-credential",
+		"workspace_admin_api_key": "synthetic-3-credential",
+		"tenant_admin_api_key":    "synthetic-4-credential",
 	})
 	if response.Diagnostics.HasError() {
 		t.Fatalf("provider configuration failed: %v", response.Diagnostics)
@@ -467,6 +653,16 @@ func TestProviderRoutesCredentialsByAudience(t *testing.T) {
 			audience:          "project",
 			path:              "/project",
 			wantAuthorization: "Bearer synthetic-2-credential",
+		},
+		{
+			audience:          "workspace",
+			path:              "/workspace",
+			wantAuthorization: "Bearer synthetic-3-credential",
+		},
+		{
+			audience:          "tenant",
+			path:              "/tenant",
+			wantAuthorization: "Bearer synthetic-4-credential",
 		},
 	}
 	for _, test := range tests {
@@ -500,6 +696,18 @@ func TestProviderDoesNotFallbackAcrossCredentialAudiences(t *testing.T) {
 			name:            "only project",
 			field:           "api_key",
 			presentAudience: "project",
+			missingAudience: "workspace",
+		},
+		{
+			name:            "only workspace",
+			field:           "workspace_admin_api_key",
+			presentAudience: "workspace",
+			missingAudience: "tenant",
+		},
+		{
+			name:            "only tenant",
+			field:           "tenant_admin_api_key",
+			presentAudience: "tenant",
 			missingAudience: "admin",
 		},
 	}
@@ -532,5 +740,119 @@ func TestProviderRejectsMissingCredentials(t *testing.T) {
 	}
 	if response.ResourceData != nil || response.DataSourceData != nil {
 		t.Fatal("provider configuration returned data without credentials")
+	}
+}
+
+func TestProviderIsolatesAudienceEndpointsAndHeaders(t *testing.T) {
+	type observedRequest struct {
+		endpoint, path, authorization, organization, project string
+		organizationPresent, projectPresent                  bool
+	}
+	requests := make(chan observedRequest, 64)
+	endpointFields := []string{"base_url", "workspace_base_url", "tenant_base_url"}
+	endpointURLs := map[string]string{}
+	attributes := map[string]tftypes.Value{}
+	for index, name := range endpointFields {
+		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			requests <- observedRequest{
+				name, request.URL.Path, request.Header.Get("Authorization"),
+				request.Header.Get("OpenAI-Organization"), request.Header.Get("OpenAI-Project"),
+				len(request.Header.Values("OpenAI-Organization")) > 0,
+				len(request.Header.Values("OpenAI-Project")) > 0,
+			}
+			switch request.URL.Path {
+			case "/cross-origin":
+				other := endpointFields[(index+1)%len(endpointFields)]
+				http.Redirect(writer, request, endpointURLs[other]+"/capture", http.StatusTemporaryRedirect)
+			case "/same-origin":
+				http.Redirect(writer, request, "/final", http.StatusTemporaryRedirect)
+			default:
+				writer.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprint(writer, "{}")
+			}
+		}))
+		t.Cleanup(server.Close)
+		endpointURLs[name] = server.URL
+		attributes[name] = tftypes.NewValue(tftypes.String, server.URL)
+	}
+	cases := []struct {
+		field, audience, baseURLField string
+		platformHeaders               bool
+	}{
+		{field: "admin_api_key", audience: "admin", baseURLField: "base_url", platformHeaders: true},
+		{field: "api_key", audience: "project", baseURLField: "base_url", platformHeaders: true},
+		{field: "workspace_admin_api_key", audience: "workspace", baseURLField: "workspace_base_url", platformHeaders: false},
+		{field: "tenant_admin_api_key", audience: "tenant", baseURLField: "tenant_base_url", platformHeaders: false},
+	}
+	for _, test := range cases {
+		attributes[test.field] = tftypes.NewValue(tftypes.String, "synthetic-"+test.audience)
+	}
+	response := configureProviderWithAttributeValues(t, "", false, attributes, map[string]string{
+		"OPENAI_ORG_ID":     "org-synthetic",
+		"OPENAI_PROJECT_ID": "proj-synthetic",
+	})
+	if response.Diagnostics.HasError() {
+		t.Fatalf("provider configuration failed: %v", response.Diagnostics)
+	}
+	providerData := response.ResourceData.(*openaiapi.ProviderData)
+	for _, test := range cases {
+		t.Run(test.audience, func(t *testing.T) {
+			client, ok := providerData.Client(test.audience)
+			if !ok {
+				t.Fatalf("missing %s client", test.audience)
+			}
+			for _, request := range []struct {
+				path      string
+				wantPaths []string
+				wantError bool
+			}{
+				{path: "/read", wantPaths: []string{"/read"}},
+				{path: "/same-origin", wantPaths: []string{"/same-origin", "/final"}},
+				{path: "/cross-origin", wantPaths: []string{"/cross-origin"}, wantError: true},
+			} {
+				_, err := client.Request(context.Background(), http.MethodGet, request.path, nil, nil, nil)
+				if request.wantError {
+					if err == nil || !strings.Contains(err.Error(), "redirect crosses the configured OpenAI API origin") {
+						t.Fatalf("cross-origin redirect error = %v", err)
+					}
+				} else if err != nil {
+					t.Fatalf("%s request failed: %v", request.path, err)
+				}
+				for _, wantPath := range request.wantPaths {
+					select {
+					case got := <-requests:
+						want := observedRequest{endpoint: test.baseURLField, path: wantPath, authorization: "Bearer synthetic-" + test.audience}
+						if test.platformHeaders {
+							want.organization, want.project = "org-synthetic", "proj-synthetic"
+							want.organizationPresent, want.projectPresent = true, true
+						}
+						if got != want {
+							t.Fatalf("request = %+v, want %+v", got, want)
+						}
+					default:
+						t.Fatalf("missing request to %s at %s", test.baseURLField, wantPath)
+					}
+				}
+				select {
+				case got := <-requests:
+					t.Fatalf("unexpected request: %+v", got)
+				default:
+				}
+			}
+		})
+	}
+}
+
+func TestProviderRejectsUnknownAudienceEndpoints(t *testing.T) {
+	for _, name := range []string{"base_url", "workspace_base_url", "tenant_base_url"} {
+		t.Run(name, func(t *testing.T) {
+			response := configureProviderWithAttributeValues(t, "", false, map[string]tftypes.Value{
+				name:            tftypes.NewValue(tftypes.String, tftypes.UnknownValue),
+				"admin_api_key": tftypes.NewValue(tftypes.String, testAdminAPIKey),
+			}, nil)
+			if !response.Diagnostics.HasError() || response.ResourceData != nil || response.DataSourceData != nil {
+				t.Fatal("unknown endpoint received provider clients")
+			}
+		})
 	}
 }

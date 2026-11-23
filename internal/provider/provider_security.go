@@ -95,8 +95,9 @@ func sameAPIOrigin(requestURL, endpoint *url.URL) bool {
 		effectiveAPIOriginPort(requestURL) == effectiveAPIOriginPort(endpoint)
 }
 
-func isDefaultOpenAIAPIOrigin(endpoint *url.URL) bool {
-	return sameAPIOrigin(endpoint, &url.URL{Scheme: "https", Host: "api.openai.com"})
+func isDefaultOpenAIAPIOrigin(endpoint *url.URL, defaultBaseURL string) bool {
+	defaultEndpoint, err := url.Parse(defaultBaseURL)
+	return err == nil && sameAPIOrigin(endpoint, defaultEndpoint)
 }
 
 func newCredentialAudienceHTTPClient(endpoint *url.URL) *http.Client {
