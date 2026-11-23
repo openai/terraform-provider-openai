@@ -111,7 +111,31 @@ func (r *WorkspaceWorkloadIdentityProviderResource) ModifyPlan(ctx context.Conte
 		// Keep the old identity in state for Delete, but plan a new complete provider.
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("id"), types.StringUnknown())...)
 		resp.RequiresReplace.Append(path.Root("id"))
+		return
 	}
+	if !req.Config.Raw.IsFullyKnown() {
+		return
+	}
+
+	// An omitted computed object can make unrelated computed fields unknown.
+	// Preserve a no-op plan only when every configured value still matches state.
+	for name, attribute := range req.Plan.Schema.GetAttributes() {
+		var planned, configured, prior attr.Value
+		resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root(name), &planned)...)
+		resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root(name), &configured)...)
+		resp.Diagnostics.Append(req.State.GetAttribute(ctx, path.Root(name), &prior)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if planned.Equal(prior) {
+			continue
+		}
+		if attribute.IsComputed() && configured.IsNull() && planned.IsUnknown() {
+			continue
+		}
+		return
+	}
+	resp.Plan.Raw = req.State.Raw
 }
 
 func (r *WorkspaceWorkloadIdentityProviderResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {

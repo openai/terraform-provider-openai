@@ -553,24 +553,28 @@ resource "openai_workspace_workload_identity_provider" "test" {
   workspace_id = "workspace_synthetic"
   name = "CI"
   issuer = "https://issuer.example.com"
-  verification = { type = "discovery" }
 }
 `
+	updatedConfig := strings.Replace(config, `name = "CI"`, `name = "updated CI"`, 1)
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: workspaceWIFFactories(),
 		Steps: []resource.TestStep{
 			{Config: config},
-			{Config: config, PlanOnly: true, ExpectNonEmptyPlan: true, PreConfig: func() {
+			{Config: updatedConfig, Check: resource.TestCheckResourceAttr(workspaceWIFProviderType+".test", "name", "updated CI")},
+			{Config: updatedConfig, PlanOnly: true, ExpectNonEmptyPlan: true, PreConfig: func() {
 				f.mu.Lock()
 				defer f.mu.Unlock()
 				f.bound = false
 			}},
-			{Config: config},
-			{Config: config, PlanOnly: true},
+			{Config: updatedConfig},
+			{Config: updatedConfig, PlanOnly: true},
 		},
 	})
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if count := f.writes["PATCH "+workspaceWIFProviderPath]; count != 1 {
+		t.Fatalf("expected one provider update, got %d", count)
+	}
 	for _, operation := range []string{"POST " + workspaceWIFCollection, "POST " + workspaceWIFProviderPath + "/bindings", "DELETE " + workspaceWIFProviderPath} {
 		if count := f.writes[operation]; count != 2 {
 			t.Errorf("expected initial create, replacement, and final cleanup; %s ran %d times", operation, count)
