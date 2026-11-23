@@ -31,15 +31,19 @@ import (
 )
 
 type APIClient struct {
-	AdminAPIKey        string
-	APIKey             string
-	BaseURL            string
-	Organization       string
-	Project            string
-	ProviderVersion    string
-	Client             openai.Client
-	responseCache      responseCache
-	retryAfterCooldown retryAfterCooldown
+	AdminAPIKey          string
+	APIKey               string
+	WorkspaceAdminAPIKey string
+	TenantAdminAPIKey    string
+	BaseURL              string
+	WorkspaceBaseURL     string
+	TenantBaseURL        string
+	Organization         string
+	Project              string
+	ProviderVersion      string
+	Client               openai.Client
+	responseCache        responseCache
+	retryAfterCooldown   retryAfterCooldown
 
 	// The following fields are test hooks. Provider operation uses the bounded
 	// defaults below.
@@ -429,9 +433,54 @@ func IsNotFound(err error) bool {
 	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound
 }
 
+func IsAPIError(err error, status int, codes ...string) bool {
+	var apiErr *openai.Error
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != status {
+		return false
+	}
+	for _, code := range codes {
+		if apiErr.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
 func IsNotFoundMessage(err error, message string) bool {
 	var apiErr *openai.Error
 	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound && apiErr.Message == message
+}
+
+func IsNotFoundMessageOrDetail(err error, message string) bool {
+	var apiErr *openai.Error
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusNotFound {
+		return false
+	}
+	if apiErr.Message != "" {
+		return apiErr.Message == message
+	}
+	if apiErr.RawJSON() != "" || apiErr.Response == nil || apiErr.Response.Body == nil {
+		return false
+	}
+	return hasExactErrorDetail(apiErr.Response, message)
+}
+
+func hasExactErrorDetail(response *http.Response, message string) bool {
+	// The SDK keeps the full response body, but only decodes the nested error.
+	const maxErrorDetailBytes = 16 << 10
+	body := response.Body
+	data, err := io.ReadAll(io.LimitReader(body, maxErrorDetailBytes+1))
+	response.Body = struct {
+		io.Reader
+		io.Closer
+	}{io.MultiReader(bytes.NewReader(data), body), body}
+	if err != nil || len(data) > maxErrorDetailBytes {
+		return false
+	}
+	var envelope struct {
+		Detail string `json:"detail"`
+	}
+	return json.Unmarshal(data, &envelope) == nil && envelope.Detail == message
 }
 
 func ValidatePathParameter(name string, value string) error {
@@ -1592,6 +1641,367 @@ func (v structuredValidator) ValidateObject(ctx context.Context, req validator.O
 	if err := validateStructuredValue(ctx, req.ConfigValue, v.kind); err != nil {
 		resp.Diagnostics.AddAttributeError(req.Path, "Invalid object value", err.Error())
 	}
+}
+
+type FlatTargetMember struct {
+	Name       string
+	APIName    string
+	Validation string
+	Required   bool
+	Nullable   bool
+}
+
+// ValidateFlatTargets defers unknown values during configuration validation.
+func ValidateFlatTargets(requireKnown bool, targets ...types.Object) error {
+	chosen, unknown := 0, 0
+	for _, target := range targets {
+		if target.IsUnknown() {
+			unknown++
+		} else if !target.IsNull() {
+			chosen++
+		}
+	}
+	if chosen > 1 || (chosen == 0 && unknown == 0) {
+		return errors.New("configure exactly one of workspace_target or api_organization_target")
+	}
+	if requireKnown && unknown != 0 {
+		return errors.New("the federation rule target must be known before it can be sent to OpenAI")
+	}
+	return nil
+}
+
+func WriteFlatTarget(ctx context.Context, body map[string]any, target, prior types.Object, members []FlatTargetMember) error {
+	attributes := target.Attributes()
+	priorAttributes := prior.Attributes()
+	for _, member := range members {
+		value, present := attributes[member.Name]
+		if !present || value.IsUnknown() || value.IsNull() {
+			if member.Required {
+				return fmt.Errorf("target field %q must be configured and known", member.Name)
+			}
+			priorValue := priorAttributes[member.Name]
+			if present && value.IsNull() && member.Nullable && priorValue != nil && !priorValue.IsUnknown() && !priorValue.IsNull() {
+				body[member.APIName] = nil
+			}
+			continue
+		}
+		raw, err := flatTargetRequestValue(ctx, value, member.Validation)
+		if err != nil {
+			return fmt.Errorf("invalid target field %q: %w", member.Name, err)
+		}
+		body[member.APIName] = raw
+	}
+	return nil
+}
+
+func flatTargetRequestValue(ctx context.Context, value attr.Value, validation string) (any, error) {
+	if validation != "" {
+		return StructuredBodyValue(ctx, value, validation)
+	}
+	return StructuredRequestValue(ctx, value, nil)
+}
+
+func ReadFlatTargetType(response map[string]any, allowed ...string) (string, error) {
+	kind, ok := response["target_type"].(string)
+	if ok {
+		for _, value := range allowed {
+			if kind == value {
+				return kind, nil
+			}
+		}
+	}
+	return "", errors.New("response target_type must identify a supported federation rule target")
+}
+
+func ReadFlatTarget(ctx context.Context, response map[string]any, active bool, output *types.Object, targetType types.ObjectType, members []FlatTargetMember) error {
+	if !active {
+		*output = types.ObjectNull(targetType.AttrTypes)
+		return nil
+	}
+	projected := make(map[string]any, len(members))
+	for _, member := range members {
+		raw, ok := response[member.APIName]
+		// The workspace API represents an empty claims object as null.
+		if raw == nil && member.APIName == "claims" && hasConfiguredEmptyClaims(ctx, *output) {
+			raw, ok = map[string]any{}, true
+		}
+		if member.Required && (!ok || raw == nil) {
+			return fmt.Errorf("response omitted required target field %q", member.APIName)
+		}
+		if ok {
+			projected[member.Name] = raw
+		}
+	}
+	return ApplyObjectResponseField(ctx, map[string]any{"target": projected}, []string{"target"}, output, targetType, true)
+}
+
+func hasConfiguredEmptyClaims(ctx context.Context, target types.Object) bool {
+	claims, ok := target.Attributes()["claims"].(types.Dynamic)
+	if !ok || claims.IsNull() || claims.IsUnknown() {
+		return false
+	}
+	raw, err := StructuredRequestValue(ctx, claims, nil)
+	object, ok := raw.(map[string]any)
+	return err == nil && ok && len(object) == 0
+}
+
+const workspaceWIFProviderPath = "/workspaces/{workspace_id}/workload-identity/providers/{provider_id}"
+
+// PreserveWorkspaceWIFEmptyClaims keeps configured empty claims when the API reads them as null.
+func PreserveWorkspaceWIFEmptyClaims(ctx context.Context, response map[string]any, configured types.Dynamic) {
+	if response["claims"] != nil || configured.IsNull() || configured.IsUnknown() {
+		return
+	}
+	raw, err := StructuredRequestValue(ctx, configured, nil)
+	if claims, ok := raw.(map[string]any); err == nil && ok && len(claims) == 0 {
+		response["claims"] = map[string]any{}
+	}
+}
+
+// WorkspaceWIFRequest keeps binding discovery read-only. Provider creation
+// explicitly creates its binding after Terraform has retained the provider ID.
+func (c *APIClient) WorkspaceWIFRequest(ctx context.Context, kind, method, path string, params, query map[string]string, body map[string]any) (map[string]any, error) {
+	ctx = WithExactResponseNumbers(ctx)
+	if kind == "provider" || kind == "providers" {
+		if body != nil {
+			var err error
+			body, err = workspaceWIFProviderBody(body)
+			if err != nil {
+				return nil, err
+			}
+		}
+		response, err := c.workspaceWIFHTTP(ctx, method, path, params, query, body)
+		if err != nil || method == http.MethodDelete || method == http.MethodPost {
+			return response, err
+		}
+		if kind == "provider" {
+			return workspaceWIFProviderResponse(response, params)
+		}
+		items, ok := response["items"].([]any)
+		if !ok {
+			return nil, fmt.Errorf("workspace provider list did not contain an items array")
+		}
+		for i, item := range items {
+			provider, ok := item.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("workspace provider list contained an invalid provider")
+			}
+			items[i], err = workspaceWIFProviderResponse(provider, params)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return response, nil
+	}
+	if kind != "rule" && kind != "rules" {
+		return nil, fmt.Errorf("unknown workspace WIF operation %q", kind)
+	}
+	providerParams := map[string]string{"workspace_id": params["workspace_id"], "provider_id": params["provider_id"]}
+	provider, err := c.Request(ctx, http.MethodGet, workspaceWIFProviderPath, providerParams, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := workspaceWIFProviderScope(provider, providerParams); err != nil {
+		return nil, err
+	}
+	owned := provider["owner_type"] == "chatgpt_workspace" && provider["owner_id"] == params["workspace_id"]
+	if method != http.MethodGet && !owned {
+		return nil, fmt.Errorf("the workload identity provider is managed by its owner; use tenant resources for shared configuration")
+	}
+	binding, err := findWorkspaceWIFBinding(provider, params["workspace_id"])
+	if err != nil {
+		return nil, err
+	}
+	if binding == nil {
+		if owned && kind == "rule" && (method == http.MethodGet || method == http.MethodDelete) {
+			return nil, &openai.Error{
+				StatusCode: http.StatusBadRequest,
+				Code:       "workload_identity_binding_not_found",
+				Message:    "workspace provider did not return its Codex binding",
+			}
+		}
+		return nil, fmt.Errorf("workspace provider did not return its Codex binding")
+	}
+	if kind == "rules" {
+		mappings, ok := binding["mappings"].([]any)
+		if !ok {
+			return nil, fmt.Errorf("workspace binding did not contain a mappings array")
+		}
+		items := make([]any, 0, len(mappings))
+		for _, value := range mappings {
+			mapping, ok := value.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("workspace binding contained an invalid rule")
+			}
+			if _, err := workspaceWIFID(mapping, "id"); err != nil {
+				return nil, err
+			}
+			workspaceWIFRuleOwner(mapping, provider)
+			items = append(items, mapping)
+		}
+		return map[string]any{"items": items}, nil
+	}
+	resolved := copyQueryParams(params)
+	resolved["binding_id"], err = workspaceWIFID(binding, "id")
+	if err != nil {
+		return nil, err
+	}
+	response, err := c.workspaceWIFHTTP(ctx, method, path, resolved, query, body)
+	if err != nil || method == http.MethodDelete {
+		return response, err
+	}
+	// Create returns only identifiers. The resource saves them before its read.
+	if method != http.MethodPost {
+		id, err := workspaceWIFID(response, "id")
+		if err != nil {
+			return nil, err
+		}
+		if id != params["mapping_id"] {
+			return nil, fmt.Errorf("workspace rule response did not match the requested rule")
+		}
+	}
+	workspaceWIFRuleOwner(response, provider)
+	return response, nil
+}
+
+func (c *APIClient) workspaceWIFHTTP(ctx context.Context, method, path string, params, query map[string]string, body map[string]any) (map[string]any, error) {
+	if method == http.MethodGet {
+		return c.Request(ctx, method, path, params, query, body)
+	}
+	return c.RequestWithoutRetries(ctx, method, path, params, query, body)
+}
+
+func workspaceWIFID(value map[string]any, field string) (string, error) {
+	id, ok := value[field].(string)
+	if !ok {
+		return "", fmt.Errorf("workspace WIF response is missing %s", field)
+	}
+	if err := ValidatePathParameter(field, id); err != nil {
+		return "", err
+	}
+	if strings.ContainsAny(id, "/\\") {
+		return "", fmt.Errorf("workspace WIF response has an invalid %s", field)
+	}
+	return id, nil
+}
+
+func workspaceWIFProviderScope(provider map[string]any, params map[string]string) error {
+	id, err := workspaceWIFID(provider, "id")
+	if err != nil {
+		return err
+	}
+	if expected := params["provider_id"]; expected != "" && id != expected {
+		return fmt.Errorf("workspace provider response did not match the requested provider")
+	}
+	if provider["owner_type"] == "chatgpt_workspace" && provider["owner_id"] != params["workspace_id"] {
+		return fmt.Errorf("workload identity provider belongs to another workspace")
+	}
+	return nil
+}
+
+// WorkspaceWIFHasBinding reports whether the provider has its required Codex binding.
+func WorkspaceWIFHasBinding(provider map[string]any, workspaceID string) (bool, error) {
+	binding, err := findWorkspaceWIFBinding(provider, workspaceID)
+	return binding != nil, err
+}
+
+func findWorkspaceWIFBinding(provider map[string]any, workspaceID string) (map[string]any, error) {
+	bindings, ok := provider["product_bindings"].([]any)
+	if !ok {
+		return nil, fmt.Errorf("workspace provider did not contain a product_bindings array")
+	}
+	var selected map[string]any
+	for _, value := range bindings {
+		binding, ok := value.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("workspace provider contained an invalid binding")
+		}
+		if binding["product"] != "chatgpt" || binding["resource_type"] != "workspace" || binding["resource_id"] != workspaceID || binding["capability"] != "codex_cli" {
+			continue
+		}
+		if selected != nil {
+			return nil, fmt.Errorf("workspace provider returned multiple Codex bindings for the workspace")
+		}
+		selected = binding
+	}
+	if selected == nil {
+		return nil, nil
+	}
+	if _, err := workspaceWIFID(selected, "id"); err != nil {
+		return nil, err
+	}
+	return selected, nil
+}
+
+func workspaceWIFRuleOwner(rule, provider map[string]any) {
+	rule["owner_type"] = provider["owner_type"]
+	rule["owner_id"] = provider["owner_id"]
+}
+
+func workspaceWIFProviderBody(body map[string]any) (map[string]any, error) {
+	result := make(map[string]any, len(body)+2)
+	for name, value := range body {
+		if name != "verification" {
+			result[name] = value
+		}
+	}
+	raw, present := body["verification"]
+	if !present || raw == nil {
+		return result, nil
+	}
+	verification, ok := raw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("verification must be an object")
+	}
+	result["jwks_local"], result["jwks"], result["jwks_uri"] = false, nil, nil
+	switch verification["type"] {
+	case "discovery":
+		if verification["jwks"] != nil || verification["jwks_uri"] != nil {
+			return nil, fmt.Errorf("discovery verification cannot include jwks or jwks_uri")
+		}
+	case "uploaded_jwks":
+		jwks, ok := verification["jwks"].(map[string]any)
+		if !ok || verification["jwks_uri"] != nil {
+			return nil, fmt.Errorf("uploaded_jwks verification requires jwks and excludes jwks_uri")
+		}
+		result["jwks_local"], result["jwks"] = true, jwks
+	case "jwks_uri":
+		uri, ok := verification["jwks_uri"].(string)
+		if !ok || strings.TrimSpace(uri) == "" || verification["jwks"] != nil {
+			return nil, fmt.Errorf("jwks_uri verification requires jwks_uri and excludes jwks")
+		}
+		result["jwks_uri"] = uri
+	default:
+		return nil, fmt.Errorf("verification.type must be discovery, uploaded_jwks, or jwks_uri")
+	}
+	return result, nil
+}
+
+func workspaceWIFProviderResponse(provider map[string]any, params map[string]string) (map[string]any, error) {
+	if err := workspaceWIFProviderScope(provider, params); err != nil {
+		return nil, err
+	}
+	local, ok := provider["jwks_local"].(bool)
+	if !ok {
+		return nil, fmt.Errorf("workspace provider response is missing jwks_local")
+	}
+	verification := map[string]any{"type": "discovery"}
+	if local {
+		jwks, ok := provider["jwks"].(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("workspace provider response did not include its inline JWKS")
+		}
+		verification["type"], verification["jwks"] = "uploaded_jwks", jwks
+	} else if uri, ok := provider["jwks_uri"].(string); ok && uri != "" {
+		verification["type"], verification["jwks_uri"] = "jwks_uri", uri
+	}
+	if provider["custom_ca_certificate_configured"] == true {
+		if _, ok := provider["custom_ca_certificate"].(string); !ok {
+			return nil, fmt.Errorf("workspace provider response did not include its configured CA certificate")
+		}
+	}
+	provider["verification"] = verification
+	return provider, nil
 }
 
 func nextPageCursor(response map[string]any, items []any) string {

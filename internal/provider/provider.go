@@ -4,6 +4,7 @@ package provider
 
 import (
 	"context"
+	"net/url"
 	"os"
 	"strings"
 
@@ -42,10 +43,14 @@ import (
 	resourceprojectuser "github.com/openai/terraform-provider-openai/internal/provider/resources/project_user"
 	resourceprojectuserrole "github.com/openai/terraform-provider-openai/internal/provider/resources/project_user_role"
 	resourcerole "github.com/openai/terraform-provider-openai/internal/provider/resources/role"
+	resourcetenantworkloadidentityfederationrule "github.com/openai/terraform-provider-openai/internal/provider/resources/tenant_workload_identity_federation_rule"
+	resourcetenantworkloadidentityprovider "github.com/openai/terraform-provider-openai/internal/provider/resources/tenant_workload_identity_provider"
 	resourceuserrole "github.com/openai/terraform-provider-openai/internal/provider/resources/user_role"
 	resourcewebhookendpoint "github.com/openai/terraform-provider-openai/internal/provider/resources/webhook_endpoint"
 	resourceworkloadidentityfederationrule "github.com/openai/terraform-provider-openai/internal/provider/resources/workload_identity_federation_rule"
 	resourceworkloadidentityprovider "github.com/openai/terraform-provider-openai/internal/provider/resources/workload_identity_provider"
+	resourceworkspaceworkloadidentityfederationrule "github.com/openai/terraform-provider-openai/internal/provider/resources/workspace_workload_identity_federation_rule"
+	resourceworkspaceworkloadidentityprovider "github.com/openai/terraform-provider-openai/internal/provider/resources/workspace_workload_identity_provider"
 )
 
 var _ provider.Provider = &OpenAIProvider{}
@@ -55,11 +60,15 @@ type OpenAIProvider struct {
 }
 
 type OpenAIProviderModel struct {
-	AdminAPIKey  types.String `tfsdk:"admin_api_key"`
-	APIKey       types.String `tfsdk:"api_key"`
-	BaseURL      types.String `tfsdk:"base_url"`
-	Organization types.String `tfsdk:"organization"`
-	Project      types.String `tfsdk:"project"`
+	AdminAPIKey          types.String `tfsdk:"admin_api_key"`
+	APIKey               types.String `tfsdk:"api_key"`
+	WorkspaceAdminAPIKey types.String `tfsdk:"workspace_admin_api_key"`
+	TenantAdminAPIKey    types.String `tfsdk:"tenant_admin_api_key"`
+	BaseURL              types.String `tfsdk:"base_url"`
+	WorkspaceBaseURL     types.String `tfsdk:"workspace_base_url"`
+	TenantBaseURL        types.String `tfsdk:"tenant_base_url"`
+	Organization         types.String `tfsdk:"organization"`
+	Project              types.String `tfsdk:"project"`
 }
 
 func (p *OpenAIProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
@@ -69,7 +78,7 @@ func (p *OpenAIProvider) Metadata(ctx context.Context, req provider.MetadataRequ
 
 func (p *OpenAIProvider) Schema(ctx context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Terraform provider for OpenAI API Platform administration and beta project webhook APIs.",
+		MarkdownDescription: "Terraform provider for OpenAI API Platform administration, beta project webhooks, and beta workspace and tenant workload identity federation.",
 		Attributes: map[string]schema.Attribute{
 			"admin_api_key": schema.StringAttribute{
 				MarkdownDescription: "Deprecated for configuration: admin API key used for organization administration requests. Omit this attribute and provide OPENAI_ADMIN_KEY in the Terraform process environment for both plan and apply. Terraform may save explicitly configured credentials in a plan, even when marked sensitive. Existing configurations remain supported during migration.",
@@ -83,8 +92,32 @@ func (p *OpenAIProvider) Schema(ctx context.Context, req provider.SchemaRequest,
 				Optional:            true,
 				Sensitive:           true,
 			},
+			"workspace_admin_api_key": schema.StringAttribute{
+				MarkdownDescription: "Workspace admin API key. Prefer OPENAI_WORKSPACE_ADMIN_KEY in the Terraform process environment for plan and apply. Explicit credentials can be saved in plans even when marked sensitive. A custom workspace_base_url requires an explicitly configured key.",
+				Required:            false,
+				Optional:            true,
+				Sensitive:           true,
+			},
+			"tenant_admin_api_key": schema.StringAttribute{
+				MarkdownDescription: "Tenant admin API key. Prefer OPENAI_TENANT_ADMIN_KEY in the Terraform process environment for plan and apply. Explicit credentials can be saved in plans even when marked sensitive. A custom tenant_base_url requires an explicitly configured key.",
+				Required:            false,
+				Optional:            true,
+				Sensitive:           true,
+			},
 			"base_url": schema.StringAttribute{
-				MarkdownDescription: "Base URL used for OpenAI API requests.",
+				MarkdownDescription: "Base URL used for Platform organization and project API requests. Defaults to https://api.openai.com/v1.",
+				Required:            false,
+				Optional:            true,
+				Sensitive:           false,
+			},
+			"workspace_base_url": schema.StringAttribute{
+				MarkdownDescription: "Base URL used for workspace admin API requests. Defaults to https://api.chatgpt.com/v1.",
+				Required:            false,
+				Optional:            true,
+				Sensitive:           false,
+			},
+			"tenant_base_url": schema.StringAttribute{
+				MarkdownDescription: "Base URL used for tenant admin API requests. Defaults to https://api.openai.com/v1.",
 				Required:            false,
 				Optional:            true,
 				Sensitive:           false,
@@ -112,7 +145,7 @@ func (p *OpenAIProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		return
 	}
 
-	clientConfig := &openaiapi.APIClient{BaseURL: "https://api.openai.com/v1", ProviderVersion: p.version}
+	clientConfig := &openaiapi.APIClient{BaseURL: "https://api.openai.com/v1", WorkspaceBaseURL: "https://api.chatgpt.com/v1", TenantBaseURL: "https://api.openai.com/v1", ProviderVersion: p.version}
 	if data.AdminAPIKey.IsUnknown() {
 		resp.Diagnostics.AddError("Unknown OpenAI credential", "The admin_api_key provider attribute must be known during provider configuration; omit it to use OPENAI_ADMIN_KEY.")
 		return
@@ -135,8 +168,40 @@ func (p *OpenAIProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		credentialAPIKeyFromEnvironment = strings.TrimSpace(value) != ""
 	}
 
+	credentialWorkspaceAdminAPIKeyFromEnvironment := false
+	if data.WorkspaceAdminAPIKey.IsUnknown() {
+		resp.Diagnostics.AddError("Unknown OpenAI credential", "The workspace_admin_api_key provider attribute must be known during provider configuration; omit it to use OPENAI_WORKSPACE_ADMIN_KEY.")
+		return
+	}
+	if !data.WorkspaceAdminAPIKey.IsNull() {
+		clientConfig.WorkspaceAdminAPIKey = data.WorkspaceAdminAPIKey.ValueString()
+	} else if value, ok := os.LookupEnv("OPENAI_WORKSPACE_ADMIN_KEY"); ok {
+		clientConfig.WorkspaceAdminAPIKey = value
+		credentialWorkspaceAdminAPIKeyFromEnvironment = strings.TrimSpace(value) != ""
+	}
+
+	credentialTenantAdminAPIKeyFromEnvironment := false
+	if data.TenantAdminAPIKey.IsUnknown() {
+		resp.Diagnostics.AddError("Unknown OpenAI credential", "The tenant_admin_api_key provider attribute must be known during provider configuration; omit it to use OPENAI_TENANT_ADMIN_KEY.")
+		return
+	}
+	if !data.TenantAdminAPIKey.IsNull() {
+		clientConfig.TenantAdminAPIKey = data.TenantAdminAPIKey.ValueString()
+	} else if value, ok := os.LookupEnv("OPENAI_TENANT_ADMIN_KEY"); ok {
+		clientConfig.TenantAdminAPIKey = value
+		credentialTenantAdminAPIKeyFromEnvironment = strings.TrimSpace(value) != ""
+	}
+
 	if !data.BaseURL.IsNull() && !data.BaseURL.IsUnknown() {
 		clientConfig.BaseURL = data.BaseURL.ValueString()
+	}
+
+	if !data.WorkspaceBaseURL.IsNull() && !data.WorkspaceBaseURL.IsUnknown() {
+		clientConfig.WorkspaceBaseURL = data.WorkspaceBaseURL.ValueString()
+	}
+
+	if !data.TenantBaseURL.IsNull() && !data.TenantBaseURL.IsUnknown() {
+		clientConfig.TenantBaseURL = data.TenantBaseURL.ValueString()
 	}
 
 	if !data.Organization.IsNull() && !data.Organization.IsUnknown() {
@@ -151,50 +216,109 @@ func (p *OpenAIProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		clientConfig.Project = value
 	}
 
-	clientConfig.BaseURL = strings.TrimSpace(clientConfig.BaseURL)
-	apiEndpoint, err := validateAPIBaseURL(clientConfig.BaseURL)
-	if err != nil {
-		resp.Diagnostics.AddError("Invalid OpenAI API base URL", err.Error())
+	if data.BaseURL.IsUnknown() {
+		resp.Diagnostics.AddError("Unknown OpenAI API base URL", "The base_url provider attribute must be known during provider configuration.")
 		return
 	}
-	if credentialAPIKeyFromEnvironment && !isDefaultOpenAIAPIOrigin(apiEndpoint) {
+	clientConfig.BaseURL = strings.TrimSpace(clientConfig.BaseURL)
+	apiEndpointBaseURL, err := validateAPIBaseURL(clientConfig.BaseURL)
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid OpenAI API base URL", "base_url: "+err.Error())
+		return
+	}
+	if data.WorkspaceBaseURL.IsUnknown() {
+		resp.Diagnostics.AddError("Unknown OpenAI API base URL", "The workspace_base_url provider attribute must be known during provider configuration.")
+		return
+	}
+	clientConfig.WorkspaceBaseURL = strings.TrimSpace(clientConfig.WorkspaceBaseURL)
+	apiEndpointWorkspaceBaseURL, err := validateAPIBaseURL(clientConfig.WorkspaceBaseURL)
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid OpenAI API base URL", "workspace_base_url: "+err.Error())
+		return
+	}
+	if data.TenantBaseURL.IsUnknown() {
+		resp.Diagnostics.AddError("Unknown OpenAI API base URL", "The tenant_base_url provider attribute must be known during provider configuration.")
+		return
+	}
+	clientConfig.TenantBaseURL = strings.TrimSpace(clientConfig.TenantBaseURL)
+	apiEndpointTenantBaseURL, err := validateAPIBaseURL(clientConfig.TenantBaseURL)
+	if err != nil {
+		resp.Diagnostics.AddError("Invalid OpenAI API base URL", "tenant_base_url: "+err.Error())
+		return
+	}
+	if credentialAPIKeyFromEnvironment && !isDefaultOpenAIAPIOrigin(apiEndpointBaseURL, "https://api.openai.com/v1") {
 		clientConfig.APIKey = ""
-		if strings.TrimSpace(clientConfig.AdminAPIKey) == "" {
+		if strings.TrimSpace(clientConfig.AdminAPIKey) == "" && strings.TrimSpace(clientConfig.WorkspaceAdminAPIKey) == "" && strings.TrimSpace(clientConfig.TenantAdminAPIKey) == "" {
 			resp.Diagnostics.AddError("Ambient OpenAI credential requires default origin", "OPENAI_API_KEY is only used with the default OpenAI API origin. Set the api_key provider attribute explicitly to authorize this credential audience for a custom base_url.")
 			return
 		}
 		resp.Diagnostics.AddWarning("Ignored ambient OpenAI credential", "OPENAI_API_KEY is only used with the default OpenAI API origin. Set the api_key provider attribute explicitly to authorize this credential audience for a custom base_url.")
 	}
-	if strings.TrimSpace(clientConfig.AdminAPIKey) == "" && strings.TrimSpace(clientConfig.APIKey) == "" {
-		resp.Diagnostics.AddError("Missing OpenAI API key", "Set admin_api_key, OPENAI_ADMIN_KEY, api_key, OPENAI_API_KEY.")
+	if credentialWorkspaceAdminAPIKeyFromEnvironment && !isDefaultOpenAIAPIOrigin(apiEndpointWorkspaceBaseURL, "https://api.chatgpt.com/v1") {
+		clientConfig.WorkspaceAdminAPIKey = ""
+		if strings.TrimSpace(clientConfig.AdminAPIKey) == "" && strings.TrimSpace(clientConfig.APIKey) == "" && strings.TrimSpace(clientConfig.TenantAdminAPIKey) == "" {
+			resp.Diagnostics.AddError("Ambient OpenAI credential requires default origin", "OPENAI_WORKSPACE_ADMIN_KEY is only used with the default OpenAI API origin. Set the workspace_admin_api_key provider attribute explicitly to authorize this credential audience for a custom workspace_base_url.")
+			return
+		}
+		resp.Diagnostics.AddWarning("Ignored ambient OpenAI credential", "OPENAI_WORKSPACE_ADMIN_KEY is only used with the default OpenAI API origin. Set the workspace_admin_api_key provider attribute explicitly to authorize this credential audience for a custom workspace_base_url.")
+	}
+	if credentialTenantAdminAPIKeyFromEnvironment && !isDefaultOpenAIAPIOrigin(apiEndpointTenantBaseURL, "https://api.openai.com/v1") {
+		clientConfig.TenantAdminAPIKey = ""
+		if strings.TrimSpace(clientConfig.AdminAPIKey) == "" && strings.TrimSpace(clientConfig.APIKey) == "" && strings.TrimSpace(clientConfig.WorkspaceAdminAPIKey) == "" {
+			resp.Diagnostics.AddError("Ambient OpenAI credential requires default origin", "OPENAI_TENANT_ADMIN_KEY is only used with the default OpenAI API origin. Set the tenant_admin_api_key provider attribute explicitly to authorize this credential audience for a custom tenant_base_url.")
+			return
+		}
+		resp.Diagnostics.AddWarning("Ignored ambient OpenAI credential", "OPENAI_TENANT_ADMIN_KEY is only used with the default OpenAI API origin. Set the tenant_admin_api_key provider attribute explicitly to authorize this credential audience for a custom tenant_base_url.")
+	}
+	if strings.TrimSpace(clientConfig.AdminAPIKey) == "" && strings.TrimSpace(clientConfig.APIKey) == "" && strings.TrimSpace(clientConfig.WorkspaceAdminAPIKey) == "" && strings.TrimSpace(clientConfig.TenantAdminAPIKey) == "" {
+		resp.Diagnostics.AddError("Missing OpenAI API key", "Set admin_api_key, OPENAI_ADMIN_KEY, api_key, OPENAI_API_KEY, workspace_admin_api_key, OPENAI_WORKSPACE_ADMIN_KEY, tenant_admin_api_key, OPENAI_TENANT_ADMIN_KEY.")
 		return
 	}
-	newAPIClient := func(apiKey string) *openaiapi.APIClient {
+	newAPIClient := func(apiKey string, endpoint *url.URL, sendPlatformHeaders bool) *openaiapi.APIClient {
+		organization, project := "", ""
+		if sendPlatformHeaders {
+			organization = clientConfig.Organization
+			project = clientConfig.Project
+		}
 		options := []option.RequestOption{
-			option.WithBaseURL(clientConfig.BaseURL),
-			option.WithHTTPClient(newCredentialAudienceHTTPClient(apiEndpoint)),
+			option.WithBaseURL(endpoint.String()),
+			option.WithHTTPClient(newCredentialAudienceHTTPClient(endpoint)),
 			option.WithAPIKey(apiKey),
 		}
-		if strings.TrimSpace(clientConfig.Organization) != "" {
-			options = append(options, option.WithOrganization(clientConfig.Organization))
-		}
-		if strings.TrimSpace(clientConfig.Project) != "" {
-			options = append(options, option.WithProject(clientConfig.Project))
+		if sendPlatformHeaders {
+			if strings.TrimSpace(organization) != "" {
+				options = append(options, option.WithOrganization(organization))
+			}
+			if strings.TrimSpace(project) != "" {
+				options = append(options, option.WithProject(project))
+			}
+		} else {
+			// The SDK also reads Platform headers from the environment.
+			options = append(options,
+				option.WithOrganization(""), option.WithProject(""),
+				option.WithHeaderDel("OpenAI-Organization"), option.WithHeaderDel("OpenAI-Project"),
+			)
 		}
 		return &openaiapi.APIClient{
-			BaseURL:         clientConfig.BaseURL,
-			Organization:    clientConfig.Organization,
-			Project:         clientConfig.Project,
+			BaseURL:         endpoint.String(),
+			Organization:    organization,
+			Project:         project,
 			ProviderVersion: p.version,
 			Client:          openai.NewClient(options...),
 		}
 	}
 	providerData := openaiapi.NewProviderData()
 	if apiKey := strings.TrimSpace(clientConfig.AdminAPIKey); apiKey != "" {
-		providerData.SetClient("admin", newAPIClient(apiKey))
+		providerData.SetClient("admin", newAPIClient(apiKey, apiEndpointBaseURL, true))
 	}
 	if apiKey := strings.TrimSpace(clientConfig.APIKey); apiKey != "" {
-		providerData.SetClient("project", newAPIClient(apiKey))
+		providerData.SetClient("project", newAPIClient(apiKey, apiEndpointBaseURL, true))
+	}
+	if apiKey := strings.TrimSpace(clientConfig.WorkspaceAdminAPIKey); apiKey != "" {
+		providerData.SetClient("workspace", newAPIClient(apiKey, apiEndpointWorkspaceBaseURL, false))
+	}
+	if apiKey := strings.TrimSpace(clientConfig.TenantAdminAPIKey); apiKey != "" {
+		providerData.SetClient("tenant", newAPIClient(apiKey, apiEndpointTenantBaseURL, false))
 	}
 	resp.DataSourceData = providerData
 	resp.ResourceData = providerData
@@ -232,6 +356,10 @@ func (p *OpenAIProvider) Resources(ctx context.Context) []func() resource.Resour
 		resourceprojecthostedtoolpermissions.NewProjectHostedToolPermissionsResource,
 		resourceprojectdataretention.NewProjectDataRetentionResource,
 		resourceprojectspendlimit.NewProjectSpendLimitResource,
+		resourcetenantworkloadidentityprovider.NewTenantWorkloadIdentityProviderResource,
+		resourcetenantworkloadidentityfederationrule.NewTenantWorkloadIdentityFederationRuleResource,
+		resourceworkspaceworkloadidentityprovider.NewWorkspaceWorkloadIdentityProviderResource,
+		resourceworkspaceworkloadidentityfederationrule.NewWorkspaceWorkloadIdentityFederationRuleResource,
 	}
 }
 
@@ -286,6 +414,14 @@ func (p *OpenAIProvider) DataSources(ctx context.Context) []func() datasource.Da
 		resourceprojectgrouprole.NewProjectGroupRolesDataSource,
 		resourceprojectgroup.NewProjectGroupDataSource,
 		resourceprojectgroup.NewProjectGroupsDataSource,
+		resourcetenantworkloadidentityprovider.NewTenantWorkloadIdentityProviderDataSource,
+		resourcetenantworkloadidentityprovider.NewTenantWorkloadIdentityProvidersDataSource,
+		resourcetenantworkloadidentityfederationrule.NewTenantWorkloadIdentityFederationRuleDataSource,
+		resourcetenantworkloadidentityfederationrule.NewTenantWorkloadIdentityFederationRulesDataSource,
+		resourceworkspaceworkloadidentityprovider.NewWorkspaceWorkloadIdentityProviderDataSource,
+		resourceworkspaceworkloadidentityprovider.NewWorkspaceWorkloadIdentityProvidersDataSource,
+		resourceworkspaceworkloadidentityfederationrule.NewWorkspaceWorkloadIdentityFederationRuleDataSource,
+		resourceworkspaceworkloadidentityfederationrule.NewWorkspaceWorkloadIdentityFederationRulesDataSource,
 	}
 }
 

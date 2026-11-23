@@ -8,11 +8,13 @@ disclosure and reportability policy.
 ## 1. Overview
 
 The provider is a Terraform protocol plugin that manages privileged OpenAI
-Administration API resources and project-scoped webhook endpoints. Terraform
+Administration API resources, project-scoped webhook endpoints, and workspace
+and tenant workload identity resources. Terraform
 loads the provider, supplies configuration, plan, state, and import values, and
 the provider translates those values into requests to the configured API
-origin. Administration resources use only the configured Admin API credential;
-webhook resources use only the configured project API credential. The
+origin. Each resource selects its own credential audience: Platform Admin,
+project, workspace admin, or tenant admin. Credentials never fall back across
+audiences. The
 provider bounds GET and paginated API responses, parses API responses,
 validates modeled fields, and some data sources intentionally persist the
 bounded raw GET response as `response_json` state. Mutation responses use the
@@ -28,9 +30,9 @@ registry ([main.go](../../main.go#L16-L24),
 
 | Component | Responsibility | Evidence |
 | --- | --- | --- |
-| Provider configuration | Selects audience-specific Admin and project API credentials, API origin, organization, and project; creates isolated clients for configured credential audiences without cross-audience fallback. | [internal/provider/provider.go](../../internal/provider/provider.go#L63-L177) |
+| Provider configuration | Selects Platform Admin, project, workspace admin, and tenant admin credentials and their endpoints; creates isolated clients without cross-audience fallback. Workspace and tenant clients do not send Platform organization or project headers. | [internal/provider/provider.go](../../internal/provider/provider.go), [internal/provider/provider_security.go](../../internal/provider/provider_security.go) |
 | API client | Expands fixed route templates, escapes path parameters, issues lifecycle-bounded requests, applies byte budgets to GET/paginated responses, parses responses, paginates, caches reads, and records redacted lifecycle telemetry. | [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L293-L325), [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L337-L456), [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L811-L861), [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L870-L929), [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L946-L1144) |
-| Generated resources and data sources | Map Terraform schemas and CRUD/read operations to organization and project Administration API endpoints or project-scoped webhook endpoints, selecting the declared credential audience during configuration. | [internal/provider/provider.go](../../internal/provider/provider.go#L180-L261), [internal/provider/resources/webhook_endpoint/resource_webhook_endpoint.go](../../internal/provider/resources/webhook_endpoint/resource_webhook_endpoint.go#L140-L166) |
+| Generated resources and data sources | Map Terraform schemas and CRUD/read operations to Platform, workspace, and tenant API endpoints, selecting the declared credential audience during configuration. | [internal/provider/provider.go](../../internal/provider/provider.go) |
 | Service-account resource | Creates only a service account and deliberately does not create an API key or assign a role. | [internal/provider/resources/project_service_account/resource_project_service_account.go](../../internal/provider/resources/project_service_account/resource_project_service_account.go#L44-L46), [internal/provider/resources/project_service_account/resource_project_service_account.go](../../internal/provider/resources/project_service_account/resource_project_service_account.go#L121-L159) |
 | Ordinary CI | Builds, tests, lints, formats examples, checks generated docs, and verifies release SBOMs with read-only repository permission. | [.github/workflows/ci.yml](../../.github/workflows/ci.yml#L13-L15), [.github/workflows/ci.yml](../../.github/workflows/ci.yml#L43-L162) |
 | Release workflows | Create release PRs, automatically tag their merged commits with draft releases, then publish verified signed artifacts through scoped environments. | [.github/workflows/release-please.yml](../../.github/workflows/release-please.yml#L8-L32), [.github/workflows/release.yml](../../.github/workflows/release.yml#L12-L109) |
@@ -39,7 +41,7 @@ registry ([main.go](../../main.go#L16-L24),
 
 | Deployment or workflow | Resource or capability | Configuration and precedence | Safe effective value or location | Readers, writers, or recipients | Enforcing control | Evidence or unknowns |
 | --- | --- | --- | --- | --- | --- | --- |
-| Normal provider execution | Audience-specific credentials and request destination | `admin_api_key` overrides `OPENAI_ADMIN_KEY`; `api_key` overrides `OPENAI_API_KEY`; `base_url` overrides the default origin. The ambient project key is used only with the default OpenAI origin. | Credential values are secret; default destination is `https://api.openai.com/v1`. | The matching audience client and configured API origin. | Both credentials are schema-sensitive; resources explicitly select one audience and never fall back to the other; an ambient project key is ignored for a custom origin unless `api_key` explicitly authorizes the pairing; destination validation rejects embedded credentials and non-loopback plaintext HTTP; redirects stay on the configured origin. A deployment must not let a lower-trust config author choose `base_url` while a separate trusted runtime injects `OPENAI_ADMIN_KEY` or supplies an explicitly configured project credential. | [internal/provider/provider.go](../../internal/provider/provider.go#L67-L84), [internal/provider/provider.go](../../internal/provider/provider.go#L113-L181), [internal/provider/provider_security.go](../../internal/provider/provider_security.go#L19-L52), [internal/provider/provider_security.go](../../internal/provider/provider_security.go#L84-L121) |
+| Normal provider execution | Audience-specific credentials and request destination | Each explicit credential overrides its corresponding environment variable. `base_url`, `workspace_base_url`, and `tenant_base_url` select the respective endpoints. Ambient project, workspace, and tenant credentials are used only with their default origins. | Credential values are secret. Workspace requests default to `https://api.chatgpt.com/v1`; other audiences default to `https://api.openai.com/v1`. | The matching audience client and configured API origin. | All four credentials are schema-sensitive; resources select one audience without fallback. Custom origins require explicit project, workspace, or tenant credentials. URL validation rejects embedded credentials and non-loopback plaintext HTTP; redirects stay on the configured origin. A lower-trust config author must not control an endpoint paired with a separately injected Admin API key or explicit credential. | [internal/provider/provider.go](../../internal/provider/provider.go), [internal/provider/provider_security.go](../../internal/provider/provider_security.go) |
 | Terraform state and plans | Organization/project resource state, webhook signing secrets, certificate-related fields, and raw `response_json` on data sources | Terraform configuration, remote API responses, and Terraform backend policy. | Caller-managed Terraform state and plan storage; no repository-owned backend is configured here. Webhook signing secrets are returned only on creation and remain in state; raw response JSON can contain API-returned fields beyond modeled attributes. Both must be treated as confidential. | Terraform operator and backend-authorized readers. | `Sensitive: true` limits normal display for sensitive schema fields but does not remove values from state or plans. Webhook reads and updates preserve the create-time secret, while import cannot recover it; raw `response_json` is intentionally persisted by data sources. | [internal/provider/resources/webhook_endpoint/resource_webhook_endpoint.go](../../internal/provider/resources/webhook_endpoint/resource_webhook_endpoint.go#L116-L126), [internal/provider/openaiapi/client.go](../../internal/provider/openaiapi/client.go#L1450-L1456), [internal/provider/resources/certificate/data_source_certificate.go](../../internal/provider/resources/certificate/data_source_certificate.go#L92-L98), [CONTRIBUTING.md](../../CONTRIBUTING.md#L85-L93); backend controls are external. |
 | Ordinary pull-request CI | Execution of checked-in build, test, generation, and verification code | Workflow checked out at the proposed revision. | Ephemeral GitHub Actions runner. | PR code can execute in that runner; repository permission is read-only. | Workflow-level `contents: read`; no protected release credentials are declared in this workflow. | [.github/workflows/ci.yml](../../.github/workflows/ci.yml#L13-L15), [.github/workflows/ci.yml](../../.github/workflows/ci.yml#L43-L162) |
 | Release-please on main | GitHub App token for release PRs, tags, and draft releases | Push to `main`, then protected `release` environment. | Token derived from `OPENAI_SDKS_APP_PRIVATE_KEY`; literal secret is never repository data. | release-please action receives contents and pull-request write authority. | Empty workflow default permissions; token created only in the `release` environment with explicit scopes. | [.github/workflows/release-please.yml](../../.github/workflows/release-please.yml#L3-L32) |
@@ -49,10 +51,10 @@ registry ([main.go](../../main.go#L16-L24),
 
 ### Protected assets and objectives
 
-- The Admin and project API credentials must reach only the operator-selected
+- The Platform Admin, project, workspace admin, and tenant admin credentials must reach only the operator-selected
   API origin and their declared resource audiences, with no cross-audience
   fallback. They must not appear in diagnostics, logs, fixtures, source, or
-  ordinary display. The provider marks both sensitive and creates a same-origin
+  ordinary display. The provider marks all four sensitive and creates a same-origin
   redirect policy
   ([internal/provider/provider.go](../../internal/provider/provider.go#L67-L84),
   [internal/provider/provider.go](../../internal/provider/provider.go#L113-L177),
@@ -69,6 +71,16 @@ registry ([main.go](../../main.go#L16-L24),
 - Terraform state and plans can contain confidential operational data; callers
   must protect their backend even where the schema suppresses normal display
   ([CONTRIBUTING.md](../../CONTRIBUTING.md#L85-L89)).
+- Workspace WIF mutations require a workspace-owned provider and its exact
+  workspace binding. A provider shared from a tenant may be read through a
+  workspace data source but cannot be managed through a workspace resource.
+  Tenant rules select exactly one workspace or API organization target; the
+  API enforces that the target belongs to the credential's tenant. See the
+  [WIF guide](../guides/workload-identity.md) and
+  [workspace client adapter](../../internal/provider/openaiapi/client.go).
+- A failed workspace binding step must leave enough Terraform state to recover
+  or delete the provider already created. Refresh must remain read-only, and
+  only documented not-found responses may remove a managed resource from state.
 - A webhook signing secret must be captured only from the create response,
   marked sensitive, never sent in mutation bodies, and preserved rather than
   overwritten by later API responses. Import cannot recover the one-time value.
@@ -83,7 +95,7 @@ registry ([main.go](../../main.go#L16-L24),
 
 ### Actors and starting capabilities
 
-- A Terraform operator holding an Admin API key or project API key can
+- A Terraform operator holding an API key or workspace admin personal access token can
   intentionally configure the provider and request operations authorized for
   that credential audience. That authority is not a provider bypass.
 - A Terraform configuration, state, or import author can supply attribute
@@ -92,7 +104,7 @@ registry ([main.go](../../main.go#L16-L24),
   author is less trusted than the runtime that independently injects
   `OPENAI_ADMIN_KEY` or supplies an explicit credential attribute, forwarding
   that key to the author's selected endpoint is a real credential boundary.
-  `OPENAI_API_KEY` alone does not authorize a custom origin.
+  Ambient project, workspace, and tenant keys alone do not authorize custom origins.
 - The configured API/network peer can supply responses, redirects, status codes,
   and retry metadata, but should not redirect the credential across origins or
   force unbounded parsing.
@@ -126,7 +138,7 @@ reach credentials or authority reserved for protected CI/release workflows.
 ### Boundary crossings and invariants
 
 1. **Terraform host to provider.** Configuration, environment variables, plan,
-   state, and import IDs enter privileged API operations. Both credential
+   state, and import IDs enter privileged API operations. All four credential
    fields are sensitive, configuration precedence is explicit, and each
    resource fails configuration when its own audience credential is missing;
    one audience never substitutes for another
@@ -136,8 +148,10 @@ reach credentials or authority reserved for protected CI/release workflows.
    the applicable credential. If a lower-trust Terraform config author selects
    `base_url` while a separate runtime injects `OPENAI_ADMIN_KEY` or supplies an
    explicit credential attribute, credential forwarding is a real boundary.
-   The ambient project key is bound to the default OpenAI origin; custom origins
-   require `api_key` to be configured explicitly. Every endpoint must be an
+   Ambient project and tenant keys are bound to `https://api.openai.com/v1`;
+   the ambient workspace key is bound to `https://api.chatgpt.com/v1`. Custom
+   origins require the corresponding credential attribute to be configured
+   explicitly. Every endpoint must be an
    absolute HTTP(S) URL without
    embedded credentials; plaintext is loopback-only, and redirects cannot cross
    the configured origin or exceed ten hops
@@ -166,10 +180,10 @@ reach credentials or authority reserved for protected CI/release workflows.
    The webhook signing secret is a special one-time create response: it is
    stored as sensitive state, preserved when absent from reads and updates, and
    remains unavailable after import.
-5. **Acceptance tests to real organizations.** Acceptance tests are a separate,
+5. **Acceptance tests to real organizations, workspaces, and tenants.** Acceptance tests are a separate,
    mutation-capable workflow and must remain explicitly opted in with
    `TF_ACC=1`, the applicable audience credential, and fixture values; ordinary
-   unit and CI runs must not silently become live administration or webhook
+   unit and CI runs must not silently become live administration, webhook, or WIF
    mutation
    ([CONTRIBUTING.md](../../CONTRIBUTING.md#L168-L173)).
 6. **PR CI to protected release authority.** Proposed code running in ordinary
@@ -228,7 +242,7 @@ These are review hypotheses and calibration examples, not confirmed findings.
   publication of trusted artifacts. Cross-tenant API compromise is critical
   only when the provider actually bypasses an independently enforced API
   authorization boundary.
-- **High:** A lower-trust runtime/network input leaks an Admin or project
+- **High:** A lower-trust runtime/network input leaks an API or workspace admin
   credential, crosses the configured-origin or audience-isolation restriction,
   lets ordinary PR execution reach protected release credentials, or
   contaminates signed artifacts despite the release controls.
