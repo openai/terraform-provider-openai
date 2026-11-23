@@ -29,7 +29,7 @@ and its Kubernetes deployment example.
 | --- | --- | --- | --- |
 | Organization administration, including every `openai_project*` resource and data source | `admin_api_key` | `OPENAI_ADMIN_KEY` | [OpenAI Admin API key](https://platform.openai.com/settings/organization/admin-keys) |
 | Beta project webhook resources and data sources | `api_key` | `OPENAI_API_KEY` | Project API key with `api.webhooks.read`; mutations also require `api.webhooks.write` and project-owner authority |
-| Workspace workload identity providers and federation rules | `workspace_admin_api_key` | `OPENAI_WORKSPACE_ADMIN_KEY` | Workspace admin personal access token with `workspace.workload_identity.management` |
+| Workspace workload identity providers and federation rules | `workspace_admin_api_key` | `OPENAI_WORKSPACE_ADMIN_KEY` | Workspace admin personal access token with `chatgpt.workspace.workload_identity.write` |
 | Tenant workload identity providers and federation rules | `tenant_admin_api_key` | `OPENAI_TENANT_ADMIN_KEY` | Tenant admin API key with `tenant.workload_identity.read`; mutations also require `tenant.workload_identity.write` |
 
 [Admin API keys](https://developers.openai.com/api/docs/guides/admin-apis)

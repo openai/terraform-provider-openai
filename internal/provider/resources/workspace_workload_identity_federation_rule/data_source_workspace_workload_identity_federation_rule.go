@@ -240,6 +240,7 @@ func (d *WorkspaceWorkloadIdentityFederationRuleDataSource) Read(ctx context.Con
 		return
 	}
 	data.ID = types.StringValue("openai_workspace_workload_identity_federation_rule")
+	openaiapi.PreserveWorkspaceWIFEmptyClaims(ctx, responseData, data.Claims)
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"id"}, &data.ID, true); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return

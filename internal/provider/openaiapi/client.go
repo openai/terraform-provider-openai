@@ -1747,6 +1747,17 @@ func hasConfiguredEmptyClaims(ctx context.Context, target types.Object) bool {
 
 const workspaceWIFProviderPath = "/workspaces/{workspace_id}/workload-identity/providers/{provider_id}"
 
+// PreserveWorkspaceWIFEmptyClaims keeps configured empty claims when the API reads them as null.
+func PreserveWorkspaceWIFEmptyClaims(ctx context.Context, response map[string]any, configured types.Dynamic) {
+	if response["claims"] != nil || configured.IsNull() || configured.IsUnknown() {
+		return
+	}
+	raw, err := StructuredRequestValue(ctx, configured, nil)
+	if claims, ok := raw.(map[string]any); err == nil && ok && len(claims) == 0 {
+		response["claims"] = map[string]any{}
+	}
+}
+
 // WorkspaceWIFRequest keeps binding discovery read-only. Provider creation
 // explicitly creates its binding after Terraform has retained the provider ID.
 func (c *APIClient) WorkspaceWIFRequest(ctx context.Context, kind, method, path string, params, query map[string]string, body map[string]any) (map[string]any, error) {

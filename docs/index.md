@@ -24,7 +24,7 @@ The provider accepts a separate credential for each API audience:
 | Organization administration, including every `openai_project*` resource and data source | `admin_api_key` | `OPENAI_ADMIN_KEY` | [OpenAI Admin API key](https://platform.openai.com/settings/organization/admin-keys) |
 | Beta project webhook resources and data sources | `api_key` | `OPENAI_API_KEY` | Project API key with `api.webhooks.read`; full lifecycle management also requires `api.webhooks.write` and project-owner authority |
 | Beta tenant workload identity resources and data sources | `tenant_admin_api_key` | `OPENAI_TENANT_ADMIN_KEY` | Tenant Admin API key with `tenant.workload_identity.read`; resources also require `tenant.workload_identity.write` |
-| Beta workspace workload identity resources and data sources | `workspace_admin_api_key` | `OPENAI_WORKSPACE_ADMIN_KEY` | Workspace admin personal access token with `workspace.workload_identity.management` |
+| Beta workspace workload identity resources and data sources | `workspace_admin_api_key` | `OPENAI_WORKSPACE_ADMIN_KEY` | Workspace admin personal access token with `chatgpt.workspace.workload_identity.write` |
 
 Set the credentials for the resources in your configuration:
 

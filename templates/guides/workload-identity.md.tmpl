@@ -34,7 +34,7 @@ Supply only the credentials needed by the resources in your configuration:
 | Scope | Environment variable | Required authority |
 | --- | --- | --- |
 | API organization | `OPENAI_ADMIN_KEY` | Organization Admin API key |
-| ChatGPT workspace | `OPENAI_WORKSPACE_ADMIN_KEY` | Workspace admin PAT with `workspace.workload_identity.management` |
+| ChatGPT workspace | `OPENAI_WORKSPACE_ADMIN_KEY` | Workspace admin PAT with `chatgpt.workspace.workload_identity.write` |
 | Tenant | `OPENAI_TENANT_ADMIN_KEY` | Tenant admin API key with `tenant.workload_identity.read` and, for resources, `tenant.workload_identity.write` |
 
 Data sources need read access. Set the credentials in the Terraform process

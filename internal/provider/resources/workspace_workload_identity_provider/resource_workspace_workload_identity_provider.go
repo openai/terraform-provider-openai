@@ -86,7 +86,7 @@ func (r *WorkspaceWorkloadIdentityProviderResource) Metadata(ctx context.Context
 
 func (r *WorkspaceWorkloadIdentityProviderResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Beta. Manage a workload identity provider owned by a ChatGPT workspace for Codex. Requires a workspace admin personal access token with workspace.workload_identity.management. Shared tenant providers are managed with tenant resources.\n\nAuthentication: Set the workspace_admin_api_key provider attribute or OPENAI_WORKSPACE_ADMIN_KEY environment variable for the workspace API audience; with a custom workspace_base_url, set the workspace_admin_api_key provider attribute explicitly.",
+		MarkdownDescription: "Beta. Manage a workload identity provider owned by a ChatGPT workspace for Codex. Requires a workspace admin personal access token with chatgpt.workspace.workload_identity.write. Shared tenant providers are managed with tenant resources.\n\nAuthentication: Set the workspace_admin_api_key provider attribute or OPENAI_WORKSPACE_ADMIN_KEY environment variable for the workspace API audience; with a custom workspace_base_url, set the workspace_admin_api_key provider attribute explicitly.",
 		Attributes: map[string]schema.Attribute{
 			"workspace_id": schema.StringAttribute{
 				MarkdownDescription: "ID of the owning ChatGPT workspace.",

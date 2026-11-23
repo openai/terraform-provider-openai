@@ -120,6 +120,10 @@ func (f *workspaceWIFFixture) server(t *testing.T) *httptest.Server {
 		write := func(value any) { _ = json.NewEncoder(w).Encode(value) }
 		merge := func(target map[string]any) {
 			for key, value := range body {
+				// The workspace API reads an empty claims object back as null.
+				if claims, ok := value.(map[string]any); key == "claims" && ok && len(claims) == 0 {
+					value = nil
+				}
 				target[key] = value
 			}
 		}
@@ -282,6 +286,39 @@ resource "openai_workspace_workload_identity_federation_rule" "test" {
 			t.Errorf("policy changes replaced %s: %d creates", path, count)
 		}
 	}
+}
+
+func TestWorkspaceWIFEmptyClaims(t *testing.T) {
+	f := newWorkspaceWIFFixture()
+	f.seed()
+	f.rule = nil
+	s := f.server(t)
+	config := func(name, claims string) string {
+		return workspaceWIFConfig(s.URL) + fmt.Sprintf(`
+resource "openai_workspace_workload_identity_federation_rule" "test" {
+  workspace_id = "workspace_synthetic"
+  workload_identity_provider_id = "wip_synthetic"
+  principal_id = "principal_synthetic"
+  external_subject = "ci:release"
+  name = %q
+  claims = %s
+}
+`, name, claims)
+	}
+	address := workspaceWIFRuleType + ".test"
+	initial := config("initial", "{}")
+	updated := config("updated", "{}")
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: workspaceWIFFactories(),
+		Steps: []resource.TestStep{
+			{Config: initial, Check: resource.TestCheckResourceAttr(address, "claims.%", "0")},
+			{Config: initial, PlanOnly: true},
+			{Config: config("populated", `{ repository_id = 42 }`), Check: resource.TestCheckResourceAttr(address, "claims.repository_id", "42")},
+			{Config: updated, Check: resource.TestCheckResourceAttr(address, "claims.%", "0")},
+			{Config: updated, PlanOnly: true},
+			{Config: config("absent", "null"), Check: resource.TestCheckNoResourceAttr(address, "claims")},
+		},
+	})
 }
 
 func TestWorkspaceWIFDataSources(t *testing.T) {

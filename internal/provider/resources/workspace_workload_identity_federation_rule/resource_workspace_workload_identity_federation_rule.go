@@ -376,6 +376,7 @@ func (r *WorkspaceWorkloadIdentityFederationRuleResource) Create(ctx context.Con
 			resp.Diagnostics.AddError("Invalid OpenAI API response", fmt.Sprintf("Expected id to match the requested resource identity %q, got %q.", requestedResourceID.ValueString(), data.ID.ValueString()))
 			return
 		}
+		openaiapi.PreserveWorkspaceWIFEmptyClaims(ctx, responseData, data.Claims)
 		if err := openaiapi.ApplyStringResponseField(responseData, []string{"id"}, &data.WorkloadIDentityFederationRuleID, false); err != nil {
 			resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 			return
@@ -483,6 +484,7 @@ func (r *WorkspaceWorkloadIdentityFederationRuleResource) Read(ctx context.Conte
 		resp.Diagnostics.AddError("Invalid OpenAI API response", fmt.Sprintf("Expected id to match the requested resource identity %q, got %q.", requestedResourceID.ValueString(), data.ID.ValueString()))
 		return
 	}
+	openaiapi.PreserveWorkspaceWIFEmptyClaims(ctx, responseData, data.Claims)
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"id"}, &data.WorkloadIDentityFederationRuleID, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
@@ -633,6 +635,7 @@ func (r *WorkspaceWorkloadIdentityFederationRuleResource) Update(ctx context.Con
 		resp.Diagnostics.AddError("Invalid OpenAI API response", fmt.Sprintf("Expected id to match the requested resource identity %q, got %q.", requestedResourceID.ValueString(), data.ID.ValueString()))
 		return
 	}
+	openaiapi.PreserveWorkspaceWIFEmptyClaims(ctx, responseData, data.Claims)
 	if err := openaiapi.ApplyStringResponseField(responseData, []string{"id"}, &data.WorkloadIDentityFederationRuleID, false); err != nil {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", err.Error())
 		return
