@@ -441,11 +441,6 @@ func (r *WorkspaceWorkloadIdentityProviderResource) Create(ctx context.Context, 
 		resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 	}()
 
-	resp.Diagnostics.Append(resp.Private.SetKey(ctx, "create_follow_up_pending", []byte("true"))...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
 	{
 		pathParams := map[string]string{
 			"workspace_id": data.WorkspaceID.ValueString(),
@@ -458,10 +453,6 @@ func (r *WorkspaceWorkloadIdentityProviderResource) Create(ctx context.Context, 
 			return
 		}
 		_ = responseData
-		resp.Diagnostics.Append(resp.Private.SetKey(ctx, "create_follow_up_pending", nil)...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
 	}
 
 	{
@@ -725,11 +716,6 @@ func (r *WorkspaceWorkloadIdentityProviderResource) Read(ctx context.Context, re
 		resp.Diagnostics.AddError("Missing OpenAI API client", "The provider was not configured before this operation ran.")
 		return
 	}
-	pendingCreate, privateDiags := req.Private.GetKey(ctx, "create_follow_up_pending")
-	resp.Diagnostics.Append(privateDiags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
 	pathParams := map[string]string{
 		"workspace_id": data.WorkspaceID.ValueString(),
 		"provider_id":  data.ID.ValueString(),
@@ -738,11 +724,6 @@ func (r *WorkspaceWorkloadIdentityProviderResource) Read(ctx context.Context, re
 	responseData, err := r.client.WorkspaceWIFRequest(openaiapi.WithExactResponseNumbers(ctx), "provider", "GET", "/workspaces/{workspace_id}/workload-identity/providers/{provider_id}", pathParams, queryParams, nil)
 	if err != nil {
 		if openaiapi.IsAPIError(err, 400, "workload_identity_provider_not_found") {
-			// An incomplete create may not yet be visible to this API.
-			// Keep its identity so Terraform can destroy the tainted resource.
-			if len(pendingCreate) != 0 {
-				return
-			}
 			resp.State.RemoveResource(ctx)
 			return
 		}
@@ -854,10 +835,6 @@ func (r *WorkspaceWorkloadIdentityProviderResource) Read(ctx context.Context, re
 	}
 	if data.OwnerType.ValueString() != "chatgpt_workspace" {
 		resp.Diagnostics.AddError("Invalid OpenAI API response", fmt.Sprintf("Expected owner_type to equal 'chatgpt_workspace' for openai_workspace_workload_identity_provider, got %q.", data.OwnerType.ValueString()))
-		return
-	}
-	resp.Diagnostics.Append(resp.Private.SetKey(ctx, "create_follow_up_pending", nil)...)
-	if resp.Diagnostics.HasError() {
 		return
 	}
 
@@ -1045,28 +1022,6 @@ func (r *WorkspaceWorkloadIdentityProviderResource) Delete(ctx context.Context, 
 	if data.OwnerType.ValueString() != "chatgpt_workspace" {
 		resp.Diagnostics.AddError("Refusing to delete incompatible resource", fmt.Sprintf("Expected owner_type to equal 'chatgpt_workspace' for openai_workspace_workload_identity_provider, got %q.", data.OwnerType.ValueString()))
 		return
-	}
-	pendingCreate, privateDiags := req.Private.GetKey(ctx, "create_follow_up_pending")
-	resp.Diagnostics.Append(privateDiags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	if len(pendingCreate) != 0 {
-		pathParams := map[string]string{
-			"workspace_id": data.WorkspaceID.ValueString(),
-			"provider_id":  data.ID.ValueString(),
-		}
-		queryParams := map[string]string{}
-		responseData, err := r.client.RequestWithoutRetries(openaiapi.WithExactResponseNumbers(ctx), "POST", "/workspaces/{workspace_id}/workload-identity/providers/{provider_id}/bindings", pathParams, queryParams, nil)
-		if err != nil {
-			if openaiapi.IsAPIError(err, 400, "workload_identity_provider_not_found") {
-				resp.State.RemoveResource(ctx)
-				return
-			}
-			resp.Diagnostics.AddError("OpenAI API request failed", err.Error())
-			return
-		}
-		_ = responseData
 	}
 	{
 		pathParams := map[string]string{

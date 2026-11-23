@@ -75,6 +75,9 @@ func (f *workspaceWIFFixture) providerResponse() map[string]any {
 		"id": "binding_synthetic", "product": "chatgpt", "resource_type": "workspace",
 		"resource_id": workspaceWIFID, "capability": "codex_cli", "mappings": mappings,
 	}}
+	if !f.bound {
+		result["product_bindings"] = []any{}
+	}
 	if f.bindings != nil {
 		result["product_bindings"] = f.bindings
 	}
@@ -157,7 +160,7 @@ func (f *workspaceWIFFixture) server(t *testing.T) *httptest.Server {
 			f.bound = true
 			write(map[string]any{"binding_id": "binding_synthetic", "created": true})
 		case r.URL.Path == workspaceWIFProviderPath:
-			if f.provider == nil || !f.bound {
+			if f.provider == nil {
 				workspaceWIFError(w, 400, "workload_identity_provider_not_found")
 				return
 			}
@@ -467,63 +470,78 @@ func workspaceWIFImported(t *testing.T, server tfprotov6.ProviderServer, typeNam
 	return read.NewState
 }
 
-func TestWorkspaceWIFIncompleteCreateKeepsIdentityForCleanup(t *testing.T) {
-	f := newWorkspaceWIFFixture()
-	f.failBinding = true
-	s := f.server(t)
-	server, schemas := workspaceWIFProtocol(t, s.URL)
-	typ := schemas.ResourceSchemas[workspaceWIFProviderType].ValueType()
-	config := workspaceWIFValue(t, typ, map[string]any{"workspace_id": workspaceWIFID, "name": "CI", "issuer": "https://issuer.example.com"})
-	null := workspaceWIFValue(t, typ, nil)
-	ctx := context.Background()
-	plan, err := server.PlanResourceChange(ctx, &tfprotov6.PlanResourceChangeRequest{TypeName: workspaceWIFProviderType, PriorState: null, Config: config, ProposedNewState: config})
-	if err != nil {
-		t.Fatal(err)
-	}
-	workspaceWIFNoErrors(t, plan.Diagnostics)
-	created, err := server.ApplyResourceChange(ctx, &tfprotov6.ApplyResourceChangeRequest{TypeName: workspaceWIFProviderType, PriorState: null, PlannedState: plan.PlannedState, Config: config})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !workspaceWIFHasError(created.Diagnostics) {
-		t.Fatal("binding failure did not fail creation")
-	}
-	value, err := created.NewState.Unmarshal(typ)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var fields map[string]tftypes.Value
-	if err := value.As(&fields); err != nil {
-		t.Fatal(err)
-	}
-	var id string
-	if err := fields["id"].As(&id); err != nil || id != "wip_synthetic" {
-		t.Fatalf("lost created identity: %s, %v", id, err)
-	}
-	read, err := server.ReadResource(ctx, &tfprotov6.ReadResourceRequest{TypeName: workspaceWIFProviderType, CurrentState: created.NewState, Private: created.Private})
-	if err != nil {
-		t.Fatal(err)
-	}
-	workspaceWIFNoErrors(t, read.Diagnostics)
-	retained, err := read.NewState.Unmarshal(typ)
-	if err != nil || retained.IsNull() {
-		t.Fatalf("refresh forgot an unattached provider: %v", err)
-	}
-	f.mu.Lock()
-	if f.writes["POST "+workspaceWIFCollection] != 1 || f.writes["POST "+workspaceWIFProviderPath+"/bindings"] != 1 {
-		t.Error("failed create was retried")
-	}
-	f.failBinding = false
-	f.mu.Unlock()
-	destroyed, err := server.ApplyResourceChange(ctx, &tfprotov6.ApplyResourceChangeRequest{TypeName: workspaceWIFProviderType, PriorState: read.NewState, PlannedState: null, Config: null, PlannedPrivate: read.Private})
-	if err != nil {
-		t.Fatal(err)
-	}
-	workspaceWIFNoErrors(t, destroyed.Diagnostics)
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.provider != nil {
-		t.Fatal("incomplete provider was orphaned")
+func TestWorkspaceWIFIncompleteCreateCanBeDeletedWhileBindingFails(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		refresh       bool
+		retainPrivate bool
+	}{
+		{"replacement", true, false},
+		{"destroy", true, true},
+		{"replacement_without_refresh", false, false},
+		{"destroy_without_refresh", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newWorkspaceWIFFixture()
+			f.failBinding = true
+			s := f.server(t)
+			server, schemas := workspaceWIFProtocol(t, s.URL)
+			typ := schemas.ResourceSchemas[workspaceWIFProviderType].ValueType()
+			config := workspaceWIFValue(t, typ, map[string]any{"workspace_id": workspaceWIFID, "name": "CI", "issuer": "https://issuer.example.com"})
+			null := workspaceWIFValue(t, typ, nil)
+			ctx := context.Background()
+			plan, err := server.PlanResourceChange(ctx, &tfprotov6.PlanResourceChangeRequest{TypeName: workspaceWIFProviderType, PriorState: null, Config: config, ProposedNewState: config})
+			if err != nil {
+				t.Fatal(err)
+			}
+			workspaceWIFNoErrors(t, plan.Diagnostics)
+			created, err := server.ApplyResourceChange(ctx, &tfprotov6.ApplyResourceChangeRequest{TypeName: workspaceWIFProviderType, PriorState: null, PlannedState: plan.PlannedState, Config: config})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !workspaceWIFHasError(created.Diagnostics) {
+				t.Fatal("binding failure did not fail creation")
+			}
+			value, err := created.NewState.Unmarshal(typ)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields map[string]tftypes.Value
+			if err := value.As(&fields); err != nil {
+				t.Fatal(err)
+			}
+			var id string
+			if err := fields["id"].As(&id); err != nil || id != "wip_synthetic" {
+				t.Fatalf("lost created identity: %s, %v", id, err)
+			}
+			currentState, private := created.NewState, created.Private
+			if tc.refresh {
+				read, err := server.ReadResource(ctx, &tfprotov6.ReadResourceRequest{TypeName: workspaceWIFProviderType, CurrentState: currentState, Private: private})
+				if err != nil {
+					t.Fatal(err)
+				}
+				workspaceWIFNoErrors(t, read.Diagnostics)
+				retained, err := read.NewState.Unmarshal(typ)
+				if err != nil || retained.IsNull() {
+					t.Fatalf("refresh forgot an unattached provider: %v", err)
+				}
+				currentState, private = read.NewState, read.Private
+			}
+			// Terraform can omit private state when replacing a tainted resource.
+			if !tc.retainPrivate {
+				private = nil
+			}
+			destroyed, err := server.ApplyResourceChange(ctx, &tfprotov6.ApplyResourceChangeRequest{TypeName: workspaceWIFProviderType, PriorState: currentState, PlannedState: null, Config: null, PlannedPrivate: private})
+			if err != nil {
+				t.Fatal(err)
+			}
+			workspaceWIFNoErrors(t, destroyed.Diagnostics)
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if f.provider != nil {
+				t.Fatal("incomplete provider was orphaned while binding creation was unavailable")
+			}
+		})
 	}
 }
 
