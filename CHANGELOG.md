@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/openai/terraform-provider-openai/compare/v1.6.0...v1.7.0) (2026-11-26)
+
+
+### Features
+
+* add workspace and tenant workload identity resources ([7a911e4](https://github.com/openai/terraform-provider-openai/commit/7a911e4f4ea5c8f76388372537dfe6d94a700ae5))
+
 ## [1.6.0](https://github.com/openai/terraform-provider-openai/compare/v1.5.0...v1.6.0) (2026-11-20)
 
 
